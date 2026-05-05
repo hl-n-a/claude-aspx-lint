@@ -26,6 +26,30 @@ public sealed class ServerSession
     /// </summary>
     public required Func<Task<string>> LoadDashboardHtml { get; init; }
 
+    /// <summary>
+    /// Racine canonique a laquelle scan / save / restore sont confines.
+    /// Null = pas de scoping (mode developpement).
+    /// </summary>
+    public string? AllowedRoot { get; init; }
+
+    /// <summary>
+    /// Si true, les endpoints d'ecriture (/api/save, /api/restore) renvoient 403.
+    /// </summary>
+    public bool ReadOnly { get; init; }
+
+    /// <summary>
+    /// Verifie qu'un chemin (apres normalisation Path.GetFullPath) est sous
+    /// AllowedRoot. Si AllowedRoot est null, retourne toujours true.
+    /// </summary>
+    public bool IsUnderAllowedRoot(string fullPath)
+    {
+        if (AllowedRoot is null) return true;
+        var rootFull = Path.GetFullPath(AllowedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var pathFull = Path.GetFullPath(fullPath);
+        return pathFull.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || pathFull.Equals(rootFull, StringComparison.OrdinalIgnoreCase);
+    }
+
     private readonly object _logLock = new();
     private readonly object _writableLock = new();
     private readonly HashSet<string> _writablePaths = new(StringComparer.OrdinalIgnoreCase);

@@ -1,0 +1,47 @@
+# Compose minimal pour developper / faire tourner aspx-lint en local.
+#
+# Lance :   docker compose up
+# Stop :    docker compose down
+# Rebuild : docker compose up --build
+#
+# Le dossier courant est monte sur /workspace en lecture seule par defaut,
+# et ASPXLINT_ALLOWED_ROOT confine scan/save/restore a ce dossier.
+# Ote `:ro` du volume si tu veux activer save/restore depuis la dashboard.
+
+services:
+  aspx-lint:
+    # Pour utiliser l'image GHCR publiee :
+    image: ghcr.io/hl-n-a/claude-aspx-lint:latest
+    # Ou pour build localement depuis ce repo :
+    # build:
+    #   context: .
+    #   args:
+    #     VERSION: "0.0.0-local"
+
+    container_name: aspx-lint
+    ports:
+      - "5173:5173"
+
+    environment:
+      # API key bearer. CHANGE-MOI EN PROD.
+      ASPXLINT_API_KEY: "${ASPXLINT_API_KEY:-dev-key-change-me}"
+
+      # Confine les paths manipules a /workspace.
+      ASPXLINT_ALLOWED_ROOT: "/workspace"
+
+      # Decommente pour bloquer /api/save et /api/restore :
+      # ASPXLINT_READ_ONLY: "true"
+
+    volumes:
+      # Monte le dossier courant en lecture seule (lint-only par defaut).
+      # Pour activer les write-back via /api/save, ote le `:ro`.
+      - ./:/workspace:ro
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "dotnet", "--info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

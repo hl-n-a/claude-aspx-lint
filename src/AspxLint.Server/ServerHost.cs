@@ -9,7 +9,20 @@ using QRCoder;
 
 namespace AspxLint.Server;
 
-public sealed record ServerStartOptions(int Port = 5173, string? PreferredInterface = null);
+public sealed record ServerStartOptions(
+    int Port = 5173,
+    string? PreferredInterface = null,
+    /// <summary>API key fixe a accepter. Si null, un token aleatoire est genere
+    /// au demarrage (mode "personnel" / Desktop). Posez ASPXLINT_API_KEY pour
+    /// un serveur heberge avec une cle stable.</summary>
+    string? ApiKey = null,
+    /// <summary>Si pose, scope tous les chemins manipules (scan/save/restore) a
+    /// ce dossier racine. Hors-scope = 403. Indispensable en hosting public.</summary>
+    string? AllowedRoot = null,
+    /// <summary>Si true, /api/save et /api/restore renvoient 403. Mode lecture
+    /// seule pour les deploiements ou seul le linting est autorise.</summary>
+    bool ReadOnly = false
+);
 
 public sealed record StartedServer(
     WebApplication App,
@@ -36,10 +49,13 @@ public static class ServerHost
     /// et l'enregistre comme singleton DI. A appeler avant builder.Build().
     /// </summary>
     public static ServerSession Configure(WebApplicationBuilder builder, int port)
-    {
-        var session = CreateSession();
+        => Configure(builder, new ServerStartOptions(port));
 
-        builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+    public static ServerSession Configure(WebApplicationBuilder builder, ServerStartOptions opt)
+    {
+        var session = CreateSession(opt);
+
+        builder.WebHost.UseUrls($"http://0.0.0.0:{opt.Port}");
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(session);
 
@@ -271,6 +287,21 @@ public static class ServerHost
         app.MapPost("/api/scan", (ScanRequest req) =>
         {
             session.Log("INFO", $"scan requested path={req.Path}");
+
+            // Scoping : si AllowedRoot pose, le chemin demande doit etre dessous.
+            string requestedFull;
+            try { requestedFull = Path.GetFullPath(req.Path); }
+            catch (Exception ex)
+            {
+                session.Log("WARN", $"scan rejected (bad path): {ex.Message}");
+                return Results.BadRequest(new { error = "Chemin invalide." });
+            }
+            if (!session.IsUnderAllowedRoot(requestedFull))
+            {
+                session.Log("WARN", $"scan refused (out of allowed root) path={requestedFull}");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             try
             {
                 var scanned = ProjectScanner.Scan(req.Path, RuleRegistry.All).ToList();
@@ -323,6 +354,12 @@ public static class ServerHost
 
         app.MapPost("/api/save", (SaveRequest req) =>
         {
+            if (session.ReadOnly)
+            {
+                session.Log("WARN", "save refused (read-only mode)");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             string full;
             try { full = Path.GetFullPath(req.Path); }
             catch (Exception ex)
@@ -331,6 +368,11 @@ public static class ServerHost
                 return Results.BadRequest(new { error = "Chemin invalide." });
             }
 
+            if (!session.IsUnderAllowedRoot(full))
+            {
+                session.Log("WARN", $"save refused (out of allowed root) path={full}");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
             if (!session.IsWritable(full))
             {
                 session.Log("WARN", $"save refused (not scanned) path={full}");
@@ -362,6 +404,12 @@ public static class ServerHost
 
         app.MapPost("/api/restore", (RestoreRequest req) =>
         {
+            if (session.ReadOnly)
+            {
+                session.Log("WARN", "restore refused (read-only mode)");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             string full;
             try { full = Path.GetFullPath(req.Path); }
             catch (Exception ex)
@@ -370,6 +418,11 @@ public static class ServerHost
                 return Results.BadRequest(new { error = "Chemin invalide." });
             }
 
+            if (!session.IsUnderAllowedRoot(full))
+            {
+                session.Log("WARN", $"restore refused (out of allowed root) path={full}");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
             if (!session.IsWritable(full))
             {
                 session.Log("WARN", $"restore refused (not scanned) path={full}");
@@ -441,7 +494,7 @@ public static class ServerHost
     public static StartedServer Start(ServerStartOptions opt)
     {
         var builder = WebApplication.CreateBuilder();
-        var session = Configure(builder, opt.Port);
+        var session = Configure(builder, opt);
         var app = builder.Build();
         MapRoutes(app);
         app.StartAsync().GetAwaiter().GetResult();
@@ -475,11 +528,21 @@ public static class ServerHost
     public static void PrintBannerAndQr(StartedServer s) =>
         PrintBannerAndQr(s.BuildId, s.LocalUrl, s.LanUrl, s.LogFile);
 
-    private static ServerSession CreateSession()
+    private static ServerSession CreateSession(ServerStartOptions opt)
     {
         var buildId = $"b-{DateTime.UtcNow:yyyyMMdd-HHmmss}-" +
                       Convert.ToHexString(RandomNumberGenerator.GetBytes(2)).ToLowerInvariant();
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+
+        // Token : prefere l'API key explicite, puis l'env var, puis aleatoire.
+        var token = opt.ApiKey
+                    ?? Environment.GetEnvironmentVariable("ASPXLINT_API_KEY")
+                    ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+
+        var allowedRoot = opt.AllowedRoot
+                          ?? Environment.GetEnvironmentVariable("ASPXLINT_ALLOWED_ROOT");
+        var readOnly = opt.ReadOnly
+                       || string.Equals(Environment.GetEnvironmentVariable("ASPXLINT_READ_ONLY"),
+                                        "true", StringComparison.OrdinalIgnoreCase);
 
         var (loadDashboard, dashboardSource, projectRoot) = ResolveDashboard();
         var logsDir = ResolveLogDir(projectRoot);
@@ -492,7 +555,9 @@ public static class ServerHost
             Token = token,
             LogFile = logFile,
             DashboardSource = dashboardSource,
-            LoadDashboardHtml = loadDashboard
+            LoadDashboardHtml = loadDashboard,
+            AllowedRoot = allowedRoot,
+            ReadOnly = readOnly
         };
     }
 

@@ -125,6 +125,57 @@ hébergés ailleurs ou les extensions browser.
 
 ---
 
+## Déploiement Docker
+
+L'image officielle est publiée sur GHCR à chaque push sur `main` et tag `vX.Y.Z` :
+
+```bash
+docker run --rm -d \
+    --name aspx-lint \
+    -p 5173:5173 \
+    -e ASPXLINT_API_KEY=ma-cle-secrete \
+    -e ASPXLINT_ALLOWED_ROOT=/workspace \
+    -v /chemin/vers/projets:/workspace \
+    ghcr.io/hl-n-a/claude-aspx-lint:latest
+```
+
+Puis : `http://localhost:5173/?token=ma-cle-secrete`
+
+### Variables d'environnement
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `ASPXLINT_API_KEY` | aléatoire au boot | Token bearer accepté par tous les endpoints (sauf `/healthz` et `/swagger`). Pose-le pour avoir une clé stable. |
+| `ASPXLINT_ALLOWED_ROOT` | aucun (libre) | Confine les paths manipulés (scan/save/restore) à ce dossier. Hors-scope = 403. **Indispensable en hosting public.** |
+| `ASPXLINT_READ_ONLY` | `false` | Si `true`, `/api/save` et `/api/restore` renvoient 403. Mode lecture seule. |
+
+### docker-compose
+
+Un [`docker-compose.yml`](docker-compose.yml) prêt-à-l'emploi est fourni :
+
+```bash
+docker compose up
+```
+
+Par défaut il monte le dossier courant en `/workspace:ro` (lecture seule, donc
+pas de save ni de restore possible). Ôte le `:ro` du volume pour activer
+l'écriture.
+
+### Tags d'image disponibles
+
+| Tag | Pointe sur |
+|---|---|
+| `latest` | dernier commit sur `main` |
+| `main` | idem |
+| `0.2.0`, `0.2`, `0` | release semver |
+| `sha-abc1234` | commit précis (immuable) |
+
+Le workflow [docker.yml](.github/workflows/docker.yml) build en multi-arch
+(`linux/amd64` + `linux/arm64`) et fait un smoke test (`/healthz`) avant
+de pousser.
+
+---
+
 ## App desktop (Windows)
 
 **Option 1 — `.exe` self-contained (zéro install, ~86 Mo)**

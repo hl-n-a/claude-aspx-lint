@@ -8,6 +8,31 @@ Versions are derived automatically from git tags via [MinVer](https://github.com
 
 ## [Unreleased]
 
+### Added (Phase 2 — server hostable)
+- Three new env vars to configure a hosted server :
+  - `ASPXLINT_API_KEY` — fixed bearer token (vs. random per boot).
+  - `ASPXLINT_ALLOWED_ROOT` — confines `/api/scan`, `/api/save`, `/api/restore`
+    to a specific directory tree. Out-of-scope returns 403.
+  - `ASPXLINT_READ_ONLY` — when `true`, `/api/save` and `/api/restore`
+    return 403, leaving only the lint-only surface.
+- `ServerStartOptions.ApiKey`, `AllowedRoot`, `ReadOnly` (programmatic config).
+- `ServerSession.IsUnderAllowedRoot(string)` helper (path scoping check).
+- **Dockerfile** (multi-stage, ~150 MB image, non-root user).
+- `docker-compose.yml` for local dev, mounts `./` as `/workspace:ro` by default.
+- `.dockerignore` excluding tests / coverage / IDE / docs.
+- New workflow `.github/workflows/docker.yml` building and pushing
+  `ghcr.io/hl-n-a/claude-aspx-lint` on every push to `main` and on tag `v*`,
+  multi-arch (`linux/amd64` + `linux/arm64`), with `/healthz` smoke-test
+  before publishing.
+- 8 new integration tests in `ConfiguredApiTests.cs` covering
+  `ASPXLINT_API_KEY`, `ASPXLINT_ALLOWED_ROOT` (scan-allow, scan-block,
+  subdir-allow, traversal-block) and `ASPXLINT_READ_ONLY`
+  (save-block, restore-block, scan-still-allowed).
+
+### Fixed
+- Pinned MinVer to 6.0.0 (6.1+ targets `net10.0`, doesn't launch on x64
+  .NET 9 dev box). Added explicit ignore in `dependabot.yml`.
+
 ## [0.2.0] - 2026-05-06
 
 ### Changed (BREAKING)

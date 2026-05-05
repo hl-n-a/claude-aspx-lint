@@ -1,0 +1,53 @@
+# Build outputs
+**/bin/
+**/obj/
+**/[Pp]ublish/
+**/[Tt]est[Rr]esults/
+*.dll
+*.exe
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Git / GitHub
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Tests (pas necessaires dans l'image runtime)
+tests/
+
+# Documentation
+*.md
+LICENSE
+docs/
+
+# Outils locaux
+.config/dotnet-tools.json
+.dotnet/
+.claude/
+
+# Outputs des sessions precedentes
+nupkg/
+coverage/
+logs/
+**/*.bak
+
+# Playwright
+playwright-report/
+**/.playwright/
+
+# Docker meta
+Dockerfile
+docker-compose*.yml
+.dockerignore
+coverlet.runsettings
+
+# OS
+.DS_Store
+Thumbs.db
