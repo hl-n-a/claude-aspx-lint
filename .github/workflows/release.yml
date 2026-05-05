@@ -95,7 +95,7 @@ jobs:
       # GitHub Release : .nupkg + .exe attaches, release-notes auto-generes
       # ---------------------------------------------------------------
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: aspx-lint v${{ steps.version.outputs.version }}
