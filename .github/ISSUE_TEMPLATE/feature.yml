@@ -1,0 +1,35 @@
+name: Feature request
+description: Une nouvelle fonctionnalite (CLI flag, endpoint serveur, option dashboard, etc.)
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Probleme a resoudre
+      description: Quelle frustration / quel use case t'amene ici ?
+      placeholder: |
+        Quand j'execute aspx-lint en pre-commit, j'aimerais que...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposition
+      description: Comment tu vois la solution ? (UI, API, CLI flag, exemple d'usage)
+      placeholder: |
+        Ajouter `--exclude <pattern>` pour ignorer certains fichiers.
+
+        Exemple : `aspx-lint scan . --exclude **/Generated/**.aspx`
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considerees
+      description: As-tu envisage d'autres approches ? (workarounds, configurations existantes...)
+    validations:
+      required: false

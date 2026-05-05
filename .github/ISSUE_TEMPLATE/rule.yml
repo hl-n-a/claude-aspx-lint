@@ -1,0 +1,73 @@
+name: New lint rule
+description: Proposer une nouvelle regle de linting pour les fichiers Web Forms.
+title: "[rule] "
+labels: ["new-rule", "needs-triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Les regles existantes sont listees dans le [README](https://github.com/hlabaste/aspx-lint#règles-23-au-total).
+        Avant d'ouvrir une nouvelle proposition, verifie qu'aucune regle existante ne couvre deja le cas.
+
+  - type: input
+    id: rule-id
+    attributes:
+      label: ID propose
+      description: "Format CATEGORIE-NNN. Categories : DIR, TAG, ATTR, ASP, WS, CHAR, COM, SEC, DOC, FORM, SM."
+      placeholder: "ASP-006"
+    validations:
+      required: true
+
+  - type: input
+    id: rule-name
+    attributes:
+      label: Nom court
+      placeholder: "DataBinder.Eval avec mauvaise casse"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severite
+      options:
+        - error (compile / runtime cassee)
+        - warning (mauvaise pratique mais ca marche)
+        - info (style)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fixable
+    attributes:
+      label: Auto-fix possible ?
+      options:
+        - Oui — la transformation est mecanique et sure
+        - Non — renommage / restructuration manuelle requise
+    validations:
+      required: true
+
+  - type: textarea
+    id: bad
+    attributes:
+      label: Exemple de code fautif
+      render: aspx
+    validations:
+      required: true
+
+  - type: textarea
+    id: good
+    attributes:
+      label: Exemple corrige (si auto-fix)
+      render: aspx
+    validations:
+      required: false
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Pourquoi c'est important
+      description: Lien vers MS Docs, RFC, retour d'experience prod...
+    validations:
+      required: true

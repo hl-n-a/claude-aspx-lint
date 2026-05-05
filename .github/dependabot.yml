@@ -1,0 +1,56 @@
+version: 2
+
+updates:
+  # ----------------------------------------------------------------
+  # Packages NuGet referencees dans les .csproj.
+  # Groupe les patch-updates ensemble pour reduire le bruit des PRs.
+  # ----------------------------------------------------------------
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "nuget"
+    commit-message:
+      prefix: "deps(nuget)"
+    groups:
+      patch-updates:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+      microsoft-aspnetcore:
+        patterns:
+          - "Microsoft.AspNetCore.*"
+          - "Microsoft.NET.Test.Sdk"
+      xunit:
+        patterns:
+          - "xunit*"
+      playwright:
+        patterns:
+          - "Microsoft.Playwright*"
+
+  # ----------------------------------------------------------------
+  # Actions GitHub utilisees dans .github/workflows/ et .github/actions/
+  # ----------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      all-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

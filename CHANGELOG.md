@@ -8,6 +8,13 @@ Versions are derived automatically from git tags via [MinVer](https://github.com
 
 ## [Unreleased]
 
+### Added
+- Dependabot configuration (NuGet + GitHub Actions, weekly).
+- Auto-merge workflow for Dependabot patch updates (semver-patch + minor on
+  GitHub Actions).
+- Issue templates (bug, feature, new rule) and pull request template.
+- GitHub Pages deployment of the coverage HTML report on every push to `main`.
+
 ## [0.1.0] - 2026-05-05
 
 ### Added

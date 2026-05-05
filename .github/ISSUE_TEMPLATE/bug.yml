@@ -1,0 +1,77 @@
+name: Bug report
+description: Une regle se comporte mal, le CLI plante, le dashboard affiche n'importe quoi.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de remplir cette section completement — un repro minimal vaut
+        mille mots et accelere fortement la resolution.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Comportement observe
+      description: Que s'est-il passe ?
+      placeholder: |
+        Quand je lance `aspx-lint scan ./MyProject`, j'obtiens X.
+        Je m'attendais a Y.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro minimal
+      description: Le plus petit fichier .aspx (ou commande) qui declenche le bug.
+      placeholder: |
+        ```aspx
+        <%@ Page Language="C#" %>
+        <html>
+        ...
+        ```
+
+        Commande : `aspx-lint scan ./repro --json`
+      render: markdown
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "Sortie de `aspx-lint --version` (ex: 0.1.0)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface affectee
+      options:
+        - CLI (aspx-lint scan/fix)
+        - Dashboard HTML standalone
+        - App Desktop (tray + serveur)
+        - Composite GitHub Action
+        - Autre
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / .NET
+      placeholder: "Windows 11 / .NET 9.0.x"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs eventuels
+      description: Si l'app Desktop, contenu de `logs/<buildId>.log`. Si CLI, sortie complete.
+      render: shell
+    validations:
+      required: false

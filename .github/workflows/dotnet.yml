@@ -7,6 +7,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: windows-latest
@@ -134,3 +137,40 @@ jobs:
           aspx-lint scan tests/fixtures --severity error
         shell: pwsh
         continue-on-error: true
+
+  # ===================================================================
+  # Deploy le rapport coverage HTML sur GitHub Pages — uniquement
+  # apres un push sur main qui a passe la CI. Pre-requis :
+  #   Settings > Pages > Source: GitHub Actions
+  # Une fois actif, le rapport est browsable a :
+  #   https://<user>.github.io/<repo>/
+  # ===================================================================
+  deploy-coverage-pages:
+    needs: build-and-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download coverage HTML artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage-html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage-html
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

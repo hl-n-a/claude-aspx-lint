@@ -4,6 +4,7 @@
 [![codecov](https://codecov.io/gh/hlabaste/aspx-lint/graph/badge.svg)](https://codecov.io/gh/hlabaste/aspx-lint)
 [![NuGet](https://img.shields.io/nuget/v/aspx-lint.svg)](https://www.nuget.org/packages/aspx-lint/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Coverage report](https://img.shields.io/badge/coverage-browse-d4ff3a)](https://hlabaste.github.io/aspx-lint/)
 
 Linter et auto-fixer pour fichiers **ASP.NET Web Forms** (`.aspx`, `.ascx`,
 `.master`, `.asax`). 23 règles couvrant directives de page, balises XHTML,
@@ -170,6 +171,8 @@ dotnet reportgenerator "-reports:coverage/raw/**/coverage.cobertura.xml" "-targe
 ```
 
 Actuellement **95.7 % lines** sur Core + Server.
+Rapport HTML browsable en ligne : https://hlabaste.github.io/aspx-lint/
+(deployé automatiquement par la CI sur push de `main`).
 
 ---
 
