@@ -19,7 +19,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MinVer" Version="6.1.0">
+    <!-- MinVer 6.1+ cible .NET 10 RC qu'on n'a qu'en x86. On reste sur 6.0
+         jusqu'a ce qu'on migre l'environnement de dev sur .NET 10 GA. -->
+    <PackageReference Include="MinVer" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>

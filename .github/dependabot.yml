@@ -21,9 +21,15 @@ updates:
     # Major bumps trop souvent breaking (coverlet 6→10, xunit 2→3,
     # microsoft-aspnetcore 9→10, etc.) — on les ignore et on les fera
     # manuellement quand on aura le temps de tester.
+    # Outils qui ciblent .NET 10 RC alors qu'on est en .NET 9 : on lock
+    # tant qu'on n'a pas migré l'environnement de dev.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "MinVer"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "dotnet-reportgenerator-globaltool"
+        update-types: ["version-update:semver-minor"]
     groups:
       patch-updates:
         applies-to: version-updates
