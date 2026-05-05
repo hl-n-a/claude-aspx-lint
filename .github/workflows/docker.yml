@@ -19,6 +19,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Idem dotnet.yml + release.yml : force Node 24 sur les actions JS qui
+  # declarent encore Node 20, pour calmer le warning de deprecation.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
   contents: read
