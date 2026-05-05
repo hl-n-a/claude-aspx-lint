@@ -6,13 +6,13 @@ le rapport dans GitHub Code Scanning, en une ligne de YAML.
 ## Usage minimal
 
 ```yaml
-- uses: hlabaste/aspx-lint/.github/actions/scan@v0.1.0
+- uses: hl-n-a/claude-aspx-lint/.github/actions/scan@v0.1.0
 ```
 
 ## Usage avec options
 
 ```yaml
-- uses: hlabaste/aspx-lint/.github/actions/scan@v0.1.0
+- uses: hl-n-a/claude-aspx-lint/.github/actions/scan@v0.1.0
   with:
     path: src/Web                  # default: .
     severity: error                # echec si une issue >= severity (vide = jamais)
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
-      - uses: hlabaste/aspx-lint/.github/actions/scan@v0.1.0
+      - uses: hl-n-a/claude-aspx-lint/.github/actions/scan@v0.1.0
         with:
           path: src/Web
           severity: error

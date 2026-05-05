@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question / discussion
-    url: https://github.com/hlabaste/aspx-lint/discussions
+    url: https://github.com/hl-n-a/claude-aspx-lint/discussions
     about: Pose ta question dans Discussions plutot qu'en issue.
   - name: Documentation
-    url: https://github.com/hlabaste/aspx-lint#aspx-lint
+    url: https://github.com/hl-n-a/claude-aspx-lint#aspx-lint
     about: README, regles, intégration CI, etc.

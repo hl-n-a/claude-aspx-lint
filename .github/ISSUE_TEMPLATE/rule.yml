@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Les regles existantes sont listees dans le [README](https://github.com/hlabaste/aspx-lint#règles-23-au-total).
+        Les regles existantes sont listees dans le [README](https://github.com/hl-n-a/claude-aspx-lint#règles-23-au-total).
         Avant d'ouvrir une nouvelle proposition, verifie qu'aucune regle existante ne couvre deja le cas.
 
   - type: input

@@ -1,10 +1,10 @@
 # aspx-lint
 
-[![CI](https://github.com/hlabaste/aspx-lint/actions/workflows/dotnet.yml/badge.svg)](https://github.com/hlabaste/aspx-lint/actions/workflows/dotnet.yml)
-[![codecov](https://codecov.io/gh/hlabaste/aspx-lint/graph/badge.svg)](https://codecov.io/gh/hlabaste/aspx-lint)
+[![CI](https://github.com/hl-n-a/claude-aspx-lint/actions/workflows/dotnet.yml/badge.svg)](https://github.com/hl-n-a/claude-aspx-lint/actions/workflows/dotnet.yml)
+[![codecov](https://codecov.io/gh/hl-n-a/claude-aspx-lint/graph/badge.svg)](https://codecov.io/gh/hl-n-a/claude-aspx-lint)
 [![NuGet](https://img.shields.io/nuget/v/aspx-lint.svg)](https://www.nuget.org/packages/aspx-lint/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Coverage report](https://img.shields.io/badge/coverage-browse-d4ff3a)](https://hlabaste.github.io/aspx-lint/)
+[![Coverage report](https://img.shields.io/badge/coverage-browse-d4ff3a)](https://hl-n-a.github.io/claude-aspx-lint/)
 
 Linter et auto-fixer pour fichiers **ASP.NET Web Forms** (`.aspx`, `.ascx`,
 `.master`, `.asax`). 23 règles couvrant directives de page, balises XHTML,
@@ -58,7 +58,7 @@ steps:
   - uses: actions/setup-dotnet@v4
     with:
       dotnet-version: 9.0.x
-  - uses: hlabaste/aspx-lint/.github/actions/scan@v0.1.0
+  - uses: hl-n-a/claude-aspx-lint/.github/actions/scan@v0.1.0
     with:
       path: src/Web
       severity: error          # PR rouge si une issue error+
@@ -171,7 +171,7 @@ dotnet reportgenerator "-reports:coverage/raw/**/coverage.cobertura.xml" "-targe
 ```
 
 Actuellement **95.7 % lines** sur Core + Server.
-Rapport HTML browsable en ligne : https://hlabaste.github.io/aspx-lint/
+Rapport HTML browsable en ligne : https://hl-n-a.github.io/claude-aspx-lint/
 (deployé automatiquement par la CI sur push de `main`).
 
 ---

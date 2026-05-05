@@ -43,5 +43,5 @@ Versions are derived automatically from git tags via [MinVer](https://github.com
   with `.nupkg` + Desktop self-contained `.exe`, pushes to NuGet.org.
 - Auto-versioning via MinVer : version derived from git tags.
 
-[Unreleased]: https://github.com/hlabaste/aspx-lint/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/hlabaste/aspx-lint/releases/tag/v0.1.0
+[Unreleased]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hl-n-a/claude-aspx-lint/releases/tag/v0.1.0
