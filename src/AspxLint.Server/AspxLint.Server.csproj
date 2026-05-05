@@ -10,7 +10,22 @@
 
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.8.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
     <ProjectReference Include="..\AspxLint.Core\AspxLint.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Embed la dashboard HTML comme ressource dans AspxLint.Server.dll. Cf.
+    src/AspxLint.Web/README.md pour le rationale.
+       - LogicalName fige le nom de ressource a "AspxLint.Web.index.html"
+         (sinon il prefixe avec le namespace + chemin)
+       - L'embedded resource est lue par ServerHost.LoadDashboardHtml()
+         avec un fallback disque pour le dev (hot-reload).
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\AspxLint.Web\index.html"
+                      Link="aspx_lint_dashboard.html"
+                      LogicalName="AspxLint.Web.index.html" />
   </ItemGroup>
 
 </Project>

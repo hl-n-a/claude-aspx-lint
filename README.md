@@ -15,7 +15,7 @@ Trois manières de l'utiliser :
 | Forme | Pour qui | Install |
 |---|---|---|
 | **CLI** `aspx-lint` | CI, scripts, lint local | `dotnet tool install -g aspx-lint` |
-| **Dashboard HTML** | Inspection ponctuelle, mobile, équipe | Double-clic sur `aspx_lint_dashboard.html` |
+| **Dashboard Web** | Inspection ponctuelle, mobile, équipe | Servie par `AspxLint.Server` (`/`) |
 | **App desktop** | Pairing tél / desktop, tray Windows | `dotnet run --project src/AspxLint.Desktop` |
 
 ---
@@ -81,15 +81,47 @@ Les findings apparaissent dans l'onglet *Security → Code scanning alerts* du r
 
 ---
 
-## Dashboard HTML
+## Dashboard Web
 
-Téléchargez [`aspx_lint_dashboard.html`](aspx_lint_dashboard.html) et
-ouvrez-le dans un navigateur. Glisser-déposer vos fichiers `.aspx`. Tout
-reste local — aucun fichier ne quitte votre poste.
+La dashboard est un site statique (`src/AspxLint.Web/index.html`) consommé
+par tout frontend. Elle ne tourne **que servie par AspxLint.Server** (l'analyse
+et les fixes sont délégués au moteur C#, plus de duplication JS / C#).
+
+```bash
+dotnet run --project src/AspxLint.Server
+# Ouvre l'URL Local + token affichée en console
+```
 
 Si vous voulez aussi inspecter / corriger depuis votre téléphone, lancez
-plutôt l'app desktop (ci-dessous) qui héberge le même dashboard sur un
-serveur local accessible via QR code.
+plutôt l'app desktop (ci-dessous) qui embarque le serveur dans un .exe et
+expose un QR code pour pairer le tél.
+
+## API HTTP
+
+Le serveur expose un contrat REST consommé par tous les frontends (Web
+dashboard, Desktop, futures extensions Chrome/VS) :
+
+```
+GET  /                  → dashboard HTML
+GET  /healthz           → no auth, healthcheck
+GET  /api/rules         → liste des 23 règles (id, name, severity, hasFix)
+POST /api/scan          → scan récursif d'un dossier (path → issues + content)
+POST /api/analyze       → analyse d'un contenu inline (content + ext)
+POST /api/fix           → applique un fix d'une règle (content + ext + ruleId)
+POST /api/fix-all       → applique tous les fixes auto-fixables
+POST /api/save          → écrit sur disque (allowlist + .bak)
+POST /api/restore       → restaure depuis .bak
+```
+
+**Auth** : token bearer, accepté via `?token=`, cookie `aspx_lint_token`,
+ou header `Authorization: Bearer <token>`. Le token est régénéré à chaque
+démarrage du serveur, affiché en console.
+
+**CORS** : ouvert (origin réflexif + credentials), prêt pour les frontends
+hébergés ailleurs ou les extensions browser.
+
+**OpenAPI** : la spec est exposée à `/swagger/v1/swagger.json` et l'UI Swagger
+à `/swagger` (sans auth, pour faciliter l'intégration).
 
 ---
 

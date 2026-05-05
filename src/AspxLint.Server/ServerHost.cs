@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using AspxLint.Core;
@@ -17,13 +18,16 @@ public sealed record StartedServer(
     string LocalUrl,
     string LanUrl,
     string LogFile,
-    string DashboardPath,
-    string ProjectRoot
+    string DashboardSource,
+    string? ProjectRoot
 );
 
 public sealed record ScanRequest(string Path);
 public sealed record SaveRequest(string Path, string Content);
 public sealed record RestoreRequest(string Path);
+public sealed record AnalyzeRequest(string Content, string Ext);
+public sealed record FixRequest(string Content, string Ext, string RuleId);
+public sealed record FixAllRequest(string Content, string Ext);
 
 public static class ServerHost
 {
@@ -39,7 +43,57 @@ public static class ServerHost
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(session);
 
-        session.Log("INFO", $"server starting, dashboard={session.DashboardPath}");
+        // CORS : ouvert pour permettre les frontends multi-origines (Web hostee
+        // ailleurs que le Server, extensions Chrome, etc.). On autorise les
+        // credentials (cookie aspx_lint_token) avec un origin reflexif au lieu
+        // de "*", parce que la spec CORS interdit "*" + AllowCredentials.
+        builder.Services.AddCors(options =>
+        {
+            options.AddDefaultPolicy(policy =>
+            {
+                policy.SetIsOriginAllowed(_ => true)
+                      .AllowCredentials()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            });
+        });
+
+        // OpenAPI / Swagger : auto-decouverte des minimal API endpoints.
+        // Specifie "Bearer" pour que les futurs frontends puissent tester depuis
+        // le UI Swagger.
+        builder.Services.AddEndpointsApiExplorer();
+        builder.Services.AddSwaggerGen(options =>
+        {
+            options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+            {
+                Title = "aspx-lint API",
+                Version = "v1",
+                Description = "Linter et auto-fixer pour ASP.NET Web Forms (.aspx, .ascx, .master).",
+                License = new Microsoft.OpenApi.Models.OpenApiLicense { Name = "MIT" }
+            });
+            options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+                Scheme = "bearer",
+                Description = "Token affiche en console au demarrage du serveur."
+            });
+            options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+            {
+                {
+                    new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                    {
+                        Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                        {
+                            Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+        });
+
+        session.Log("INFO", $"server starting, dashboard={session.DashboardSource}");
         return session;
     }
 
@@ -51,14 +105,38 @@ public static class ServerHost
     {
         var session = app.Services.GetRequiredService<ServerSession>();
 
-        // Auth : token en query (premier hit) ou cookie (hits suivants).
+        app.UseCors();
+
+        // Swagger UI a /swagger, spec OpenAPI a /swagger/v1/swagger.json.
+        // Sans auth pour faciliter l'integration externe (les frontends peuvent
+        // pomper le contrat sans avoir le token).
+        app.UseSwagger();
+        app.UseSwaggerUI(options =>
+        {
+            options.SwaggerEndpoint("/swagger/v1/swagger.json", "aspx-lint v1");
+            options.RoutePrefix = "swagger";
+            options.DocumentTitle = "aspx-lint API";
+        });
+
+        // Auth : token accepte via 3 canaux, dans cet ordre :
+        //   1. ?token=...                       (URL, premiere visite navigateur)
+        //   2. Cookie `aspx_lint_token`         (collant pour navigateur)
+        //   3. Header `Authorization: Bearer X` (extensions, CI, frontends remote)
         app.Use(async (ctx, next) =>
         {
-            if (ctx.Request.Path.StartsWithSegments("/healthz")) { await next(); return; }
+            if (ctx.Request.Path.StartsWithSegments("/healthz") ||
+                ctx.Request.Path.StartsWithSegments("/swagger"))
+            { await next(); return; }
 
             var supplied = ctx.Request.Query["token"].ToString();
             if (string.IsNullOrEmpty(supplied))
                 supplied = ctx.Request.Cookies["aspx_lint_token"] ?? "";
+            if (string.IsNullOrEmpty(supplied))
+            {
+                var auth = ctx.Request.Headers.Authorization.ToString();
+                if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                    supplied = auth["Bearer ".Length..];
+            }
 
             var ok = supplied.Length == session.Token.Length &&
                      CryptographicOperations.FixedTimeEquals(
@@ -87,7 +165,7 @@ public static class ServerHost
         app.MapGet("/", async (HttpContext ctx) =>
         {
             session.Log("INFO", $"dashboard served to {ctx.Connection.RemoteIpAddress}");
-            var html = await File.ReadAllTextAsync(session.DashboardPath);
+            var html = await session.LoadDashboardHtml();
             ctx.Response.ContentType = "text/html; charset=utf-8";
             await ctx.Response.WriteAsync(html);
         });
@@ -102,6 +180,93 @@ public static class ServerHost
                 hasFix = r.HasFix
             })
         ));
+
+        // ------------------------------------------------------------------
+        // Endpoints inline (path-less). Le client envoie le contenu brut, le
+        // serveur applique le moteur Core et renvoie issues / corrections,
+        // sans toucher au disque. Utilises par la dashboard pour analyser
+        // les fichiers droppes / colles, et par les frontends futurs (Chrome,
+        // VS extension, etc.) qui n'ont pas de chemin a fournir.
+        // ------------------------------------------------------------------
+
+        app.MapPost("/api/analyze", (AnalyzeRequest req) =>
+        {
+            var ctx = new RuleContext((req.Ext ?? "").ToLowerInvariant(), "");
+            var lines = (req.Content ?? "").Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            var issues = RuleRegistry.All
+                .SelectMany(r => r.Detect(req.Content ?? "", lines, ctx))
+                .Select(i => new
+                {
+                    ruleId = i.RuleId,
+                    ruleName = i.RuleName,
+                    severity = i.Severity.ToString().ToLowerInvariant(),
+                    line = i.Line,
+                    col = i.Col,
+                    snippet = i.Snippet,
+                    hint = i.Hint
+                })
+                .ToList();
+            return Results.Ok(new { issues });
+        });
+
+        app.MapPost("/api/fix", (FixRequest req) =>
+        {
+            var rule = RuleRegistry.All.FirstOrDefault(r =>
+                r.Id.Equals(req.RuleId, StringComparison.OrdinalIgnoreCase));
+            if (rule is null)
+                return Results.NotFound(new { error = $"Regle inconnue : {req.RuleId}" });
+            if (!rule.HasFix)
+                return Results.BadRequest(new { error = $"Regle {req.RuleId} n'a pas d'auto-fix" });
+
+            var ctx = new RuleContext((req.Ext ?? "").ToLowerInvariant(), "");
+            var content = req.Content ?? "";
+            var beforeCount = CountRuleIssues(rule, content, ctx);
+            var fixedContent = rule.Fix(content, ctx) ?? content;
+            var afterCount = CountRuleIssues(rule, fixedContent, ctx);
+            return Results.Ok(new
+            {
+                content = fixedContent,
+                applied = Math.Max(0, beforeCount - afterCount)
+            });
+        });
+
+        app.MapPost("/api/fix-all", (FixAllRequest req) =>
+        {
+            var ctx = new RuleContext((req.Ext ?? "").ToLowerInvariant(), "");
+            var content = req.Content ?? "";
+            var history = new List<object>();
+            var fixableRules = RuleRegistry.All.Where(r => r.HasFix).ToList();
+
+            // Matche le comportement JS d'origine : jusqu'a 5 passes pour
+            // convergence (un fix peut creer un nouveau probleme detectable).
+            for (int pass = 0; pass < 5; pass++)
+            {
+                var before = content;
+                foreach (var rule in fixableRules)
+                {
+                    var beforeCount = CountRuleIssues(rule, content, ctx);
+                    if (beforeCount == 0) continue;
+
+                    var attempted = rule.Fix(content, ctx);
+                    if (attempted is null || attempted == content) continue;
+
+                    var afterCount = CountRuleIssues(rule, attempted, ctx);
+                    var resolved = beforeCount - afterCount;
+                    content = attempted;
+                    if (resolved > 0)
+                        history.Add(new { ruleId = rule.Id, count = resolved });
+                }
+                if (content == before) break;
+            }
+
+            return Results.Ok(new { content, history });
+        });
+
+        static int CountRuleIssues(IRule rule, string content, RuleContext ctx)
+        {
+            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            return rule.Detect(content, lines, ctx).Count();
+        }
 
         app.MapPost("/api/scan", (ScanRequest req) =>
         {
@@ -286,8 +451,25 @@ public static class ServerHost
 
         return new StartedServer(
             app, session.BuildId, session.Token,
-            localUrl, lanUrl, session.LogFile, session.DashboardPath,
-            Path.GetDirectoryName(session.DashboardPath)!);
+            localUrl, lanUrl, session.LogFile, session.DashboardSource,
+            ResolveProjectRoot(session.DashboardSource));
+    }
+
+    /// <summary>
+    /// Si DashboardSource est un chemin disque ("disk:..."), renvoie le
+    /// dossier parent (le project root). Sinon (mode embedded), null.
+    /// </summary>
+    private static string? ResolveProjectRoot(string dashboardSource)
+    {
+        const string prefix = "disk:";
+        if (!dashboardSource.StartsWith(prefix)) return null;
+        var path = dashboardSource[prefix.Length..];
+        // Le HTML est a src/AspxLint.Web/index.html → on remonte 2 dossiers
+        // pour avoir la racine du repo. Heuristique simple suffisante en dev.
+        var dir = Path.GetDirectoryName(path);
+        if (dir != null) dir = Path.GetDirectoryName(dir);   // src/AspxLint.Web
+        if (dir != null) dir = Path.GetDirectoryName(dir);   // src
+        return dir;
     }
 
     public static void PrintBannerAndQr(StartedServer s) =>
@@ -299,12 +481,8 @@ public static class ServerHost
                       Convert.ToHexString(RandomNumberGenerator.GetBytes(2)).ToLowerInvariant();
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-        var dashboardPath = FindUpwards("aspx_lint_dashboard.html")
-            ?? throw new FileNotFoundException(
-                "aspx_lint_dashboard.html introuvable en remontant depuis " + AppContext.BaseDirectory);
-        var projectRoot = Path.GetDirectoryName(dashboardPath)!;
-
-        var logsDir = Path.Combine(projectRoot, "logs");
+        var (loadDashboard, dashboardSource, projectRoot) = ResolveDashboard();
+        var logsDir = ResolveLogDir(projectRoot);
         Directory.CreateDirectory(logsDir);
         var logFile = Path.Combine(logsDir, $"{buildId}.log");
 
@@ -312,17 +490,74 @@ public static class ServerHost
         {
             BuildId = buildId,
             Token = token,
-            DashboardPath = dashboardPath,
-            LogFile = logFile
+            LogFile = logFile,
+            DashboardSource = dashboardSource,
+            LoadDashboardHtml = loadDashboard
         };
     }
 
-    static string? FindUpwards(string filename)
+    /// <summary>
+    /// Resout la source de la dashboard HTML, par ordre de preference :
+    ///   1. src/AspxLint.Web/index.html sur disque (mode dev, hot-reload)
+    ///   2. AspxLint.Web/index.html (si on tourne depuis src/)
+    ///   3. Ressource embarquee "AspxLint.Web.index.html" dans le .dll
+    ///      (mode .exe self-contained, conteneur Docker, etc.)
+    /// </summary>
+    private static (Func<Task<string>> Load, string Source, string? ProjectRoot) ResolveDashboard()
+    {
+        // Disk d'abord pour le hot-reload en dev.
+        var diskCandidate = FindUpwards(Path.Combine("src", "AspxLint.Web", "index.html"))
+                         ?? FindUpwards(Path.Combine("AspxLint.Web", "index.html"));
+        if (diskCandidate != null)
+        {
+            var path = diskCandidate;
+            var root = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(path)));
+            return (() => File.ReadAllTextAsync(path), $"disk:{path}", root);
+        }
+
+        // Fallback : ressource embarquee.
+        var asm = typeof(ServerHost).Assembly;
+        const string resourceName = "AspxLint.Web.index.html";
+        using (var probe = asm.GetManifestResourceStream(resourceName))
+        {
+            if (probe == null)
+            {
+                var available = string.Join(", ", asm.GetManifestResourceNames());
+                throw new FileNotFoundException(
+                    $"Dashboard HTML introuvable. Ressources embarquees disponibles : [{available}]");
+            }
+        }
+
+        return (LoadEmbedded, $"embedded:{resourceName}", null);
+
+        static async Task<string> LoadEmbedded()
+        {
+            var asm = typeof(ServerHost).Assembly;
+            using var stream = asm.GetManifestResourceStream("AspxLint.Web.index.html")!;
+            using var reader = new StreamReader(stream);
+            return await reader.ReadToEndAsync();
+        }
+    }
+
+    /// <summary>
+    /// Logs : a cote du repo en dev (logs/), dans %LOCALAPPDATA%\AspxLint\logs
+    /// quand on est en mode embedded (pas de repo a cote du .exe).
+    /// </summary>
+    private static string ResolveLogDir(string? projectRoot)
+    {
+        if (projectRoot != null)
+            return Path.Combine(projectRoot, "logs");
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(appData, "AspxLint", "logs");
+    }
+
+    static string? FindUpwards(string relativePath)
     {
         var dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10; i++)
         {
-            var candidate = Path.Combine(dir, filename);
+            var candidate = Path.Combine(dir, relativePath);
             if (File.Exists(candidate)) return candidate;
             var parent = Directory.GetParent(dir);
             if (parent == null) return null;

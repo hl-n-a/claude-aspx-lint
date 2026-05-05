@@ -853,7 +853,7 @@
       </label>
       <div class="file-list" id="fileList"></div>
       <div class="sidebar-actions">
-        <button class="btn small" id="btnScanServer" onclick="scanServerFolder()" style="display:none">Scanner un dossier</button>
+        <button class="btn small" id="btnScanServer" onclick="scanServerFolder()">Scanner un dossier</button>
         <button class="btn small" onclick="openPasteModal()">Coller du code</button>
         <button class="btn small" onclick="loadDemo()">Charger un exemple</button>
         <button class="btn small ghost" onclick="openRulesModal()">Voir les règles · 21</button>
@@ -869,8 +869,8 @@
         <div class="code-actions">
           <button class="btn small" id="btnDiff" onclick="toggleDiff()" disabled>Avant / Après</button>
           <button class="btn small" id="btnDownload" onclick="downloadCurrent()" disabled>Télécharger corrigé</button>
-          <button class="btn small" id="btnSaveServer" onclick="saveCurrentToServer()" disabled style="display:none">Enregistrer sur le serveur</button>
-          <button class="btn small ghost" id="btnRestoreServer" onclick="restoreCurrentFromServer()" disabled style="display:none">Restaurer .bak</button>
+          <button class="btn small" id="btnSaveServer" onclick="saveCurrentToServer()" disabled>Enregistrer sur le serveur</button>
+          <button class="btn small ghost" id="btnRestoreServer" onclick="restoreCurrentFromServer()" disabled>Restaurer .bak</button>
           <button class="btn small" id="btnFixAll" onclick="fixAllInCurrent()" disabled>Tout corriger</button>
           <button class="btn small primary" id="btnVerify" onclick="verifyCurrent()" disabled>Re-vérifier</button>
         </div>
@@ -956,813 +956,44 @@
 
 <script>
 /* ============================================================
-   ASPX·LINT — Moteur de règles
+   ASPX·LINT — Frontend pur, le moteur tourne dans AspxLint.Server
    ============================================================
-   Chaque règle = { id, name, severity, desc, detect, fix }
-   - detect(content, lines) → array d'issues { line, col, snippet, hint }
-   - fix(content) → contenu corrigé
+   Toute analyse + auto-fix passe par les endpoints HTTP :
+     POST /api/analyze    → renvoie les issues d'un contenu
+     POST /api/fix        → applique le fix d'une regle
+     POST /api/fix-all    → applique toutes les regles fixables
+     GET  /api/rules      → liste des regles (id, name, severity, hasFix)
    ============================================================ */
 
-const RULES = [
-  /* ---------- DIRECTIVES ---------- */
-  {
-    id: 'DIR-001',
-    name: 'Directive de page absente ou mal placée',
-    severity: 'error',
-    desc: "Un fichier ASPX doit commencer par <%@ Page ... %>, un ASCX par <%@ Control ... %>, un MASTER par <%@ Master ... %>. La directive doit être en première ligne non vide.",
-    detect: (content, lines, ctx) => {
-      const issues = [];
-      const ext = ctx.ext;
-      const expected = ext === 'aspx' ? 'Page'
-                     : ext === 'ascx' ? 'Control'
-                     : ext === 'master' ? 'Master' : null;
-      if (!expected) return issues;
-      const firstNonEmpty = lines.findIndex(l => l.trim() !== '');
-      if (firstNonEmpty < 0) return issues;
-      const re = new RegExp('<%@\\s*' + expected + '\\b', 'i');
-      const hasDirective = lines.some(l => re.test(l));
-      if (!hasDirective) {
-        issues.push({
-          line: 1, col: 1,
-          snippet: lines[firstNonEmpty] || '',
-          hint: `Directive @${expected} manquante. Ajoutez-la en première ligne.`
-        });
-      } else if (firstNonEmpty > 0 && !re.test(lines[firstNonEmpty])) {
-        // Directive existe mais pas en premier
-        const dirLine = lines.findIndex(l => re.test(l));
-        if (dirLine !== firstNonEmpty) {
-          issues.push({
-            line: dirLine + 1, col: 1,
-            snippet: lines[dirLine],
-            hint: `La directive @${expected} doit être la première ligne non vide du fichier.`
-          });
-        }
-      }
-      return issues;
-    },
-    fix: (content, ctx) => {
-      const expected = ctx.ext === 'aspx' ? 'Page'
-                     : ctx.ext === 'ascx' ? 'Control'
-                     : ctx.ext === 'master' ? 'Master' : null;
-      if (!expected) return content;
-      const re = new RegExp('<%@\\s*' + expected + '\\b', 'i');
-      const lines = content.split(/\r?\n/);
-      const dirIndex = lines.findIndex(l => re.test(l));
-      if (dirIndex < 0) {
-        // Insertion d'une directive minimale
-        const stub = `<%@ ${expected} Language="C#" AutoEventWireup="true" %>`;
-        return stub + '\n' + content;
-      }
-      if (dirIndex > 0) {
-        const dirLine = lines.splice(dirIndex, 1)[0];
-        // Retirer lignes vides en tête
-        while (lines.length && lines[0].trim() === '') lines.shift();
-        return [dirLine, ...lines].join('\n');
-      }
-      return content;
-    }
-  },
+// Garde-fou : cette dashboard NE marche QUE servie par AspxLint.Server.
+// Si quelqu'un ouvre index.html en double-clic (file://), on remplace
+// le DOM par un message clair plutot que de planter en silence.
+if (location.protocol === 'file:') {
+  document.body.innerHTML = `
+    <div style="padding:60px;font-family:sans-serif;max-width:600px;margin:auto;background:#0f1419;color:#e0e3e7;min-height:100vh;box-sizing:border-box">
+      <h1 style="color:#d4ff3a;font-style:italic">aspx &middot; lint</h1>
+      <p>Cette dashboard nécessite <strong>AspxLint.Server</strong> pour fonctionner.</p>
+      <p>Lance le serveur depuis le repo :</p>
+      <pre style="background:#1c2025;color:#d4ff3a;padding:16px;border-radius:6px;font-family:monospace">dotnet run --project src/AspxLint.Server</pre>
+      <p>… puis ouvre l'URL <code>http://localhost:5173</code> avec le token affiché en console.</p>
+      <p>Ou télécharge <strong>AspxLint.Desktop.exe</strong> depuis la <a href="https://github.com/hl-n-a/claude-aspx-lint/releases" style="color:#d4ff3a">dernière release</a>.</p>
+    </div>
+  `;
+  throw new Error('aspx-lint dashboard requires AspxLint.Server (file:// not supported)');
+}
 
-  /* ---------- BALISES ---------- */
-  {
-    id: 'TAG-001',
-    name: 'Balise auto-fermante non conforme XHTML',
-    severity: 'warning',
-    desc: "Les balises vides comme <br>, <hr>, <img>, <input>, <meta>, <link> doivent s'écrire en auto-fermantes (ex: <br />) pour respecter la conformité XHTML utilisée par les pages ASP.NET Web Forms.",
-    detect: (content, lines) => {
-      const issues = [];
-      const voidTags = ['br','hr','img','input','meta','link','area','base','col','embed','source','track','wbr'];
-      const re = new RegExp(`<(${voidTags.join('|')})(\\s[^>]*?)?(?<!/)>`, 'gi');
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          // Skip si déjà /> (vérification supplémentaire)
-          if (m[0].endsWith('/>')) continue;
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0],
-            hint: `Remplacer par "${m[0].replace(/>$/, ' />')}"`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      const voidTags = ['br','hr','img','input','meta','link','area','base','col','embed','source','track','wbr'];
-      const re = new RegExp(`<(${voidTags.join('|')})((?:\\s[^>]*?)?)(?<!/)\\s*>`, 'gi');
-      return content.replace(re, (m, tag, attrs) => `<${tag}${attrs} />`);
-    }
-  },
-  {
-    id: 'TAG-002',
-    name: 'Casse incohérente des balises HTML',
-    severity: 'warning',
-    desc: "Les balises HTML doivent être en minuscules pour respecter HTML5/XHTML. Une casse mixte (<DIV>, <Div>) nuit à la lisibilité et peut poser des problèmes avec certains parseurs.",
-    detect: (content, lines) => {
-      const issues = [];
-      // Cherche balises HTML standard avec majuscules (hors asp:, runat="server")
-      const re = /<\/?([A-Z][a-zA-Z0-9]*)\b/g;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          const tag = m[1];
-          // Ignorer les contrôles serveur ASP.NET (asp:Xxx, uc:Xxx, namespaceperso:Xxx)
-          if (line.substring(m.index).match(/^<\/?[a-zA-Z]+:/)) continue;
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0],
-            hint: `Convertir "${tag}" en minuscules.`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      // Liste de balises HTML à mettre en minuscules
-      const htmlTags = ['html','head','body','div','span','p','a','img','br','hr','ul','ol','li','table','tr','td','th','thead','tbody','tfoot','form','input','button','select','option','textarea','label','h1','h2','h3','h4','h5','h6','section','article','header','footer','nav','main','aside','meta','link','title','script','style','strong','em','b','i','u','small','code','pre','blockquote','iframe','canvas','svg'];
-      let fixed = content;
-      htmlTags.forEach(tag => {
-        const re = new RegExp(`<(\\/?)(${tag})\\b`, 'gi');
-        fixed = fixed.replace(re, (m, slash, t) => {
-          // Ne pas toucher si dans un attribut
-          return `<${slash}${tag}`;
-        });
-      });
-      return fixed;
-    }
-  },
-  {
-    id: 'TAG-003',
-    name: 'Balises non équilibrées',
-    severity: 'error',
-    desc: "Les balises ouvertes doivent être fermées (sauf balises vides). Une pile non vide en fin de fichier signale une erreur de structure HTML.",
-    detect: (content, lines) => {
-      const issues = [];
-      const voidTags = new Set(['br','hr','img','input','meta','link','area','base','col','embed','source','track','wbr']);
-      const stack = [];
-      // Tokenizer simplifié
-      const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9:_\-]*)\b[^>]*?(\/?)>/g;
-      let m;
-      let lineMap = [];
-      let pos = 0;
-      lines.forEach((l, idx) => {
-        lineMap.push({ start: pos, end: pos + l.length, idx });
-        pos += l.length + 1;
-      });
-      const findLine = (offset) => {
-        for (const lm of lineMap) {
-          if (offset >= lm.start && offset <= lm.end) return lm.idx;
-        }
-        return 0;
-      };
-      // Exclure contenu dans <% %>, commentaires HTML, scripts
-      const cleaned = content
-        .replace(/<%[\s\S]*?%>/g, (s) => ' '.repeat(s.length))
-        .replace(/<!--[\s\S]*?-->/g, (s) => ' '.repeat(s.length))
-        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (s) => ' '.repeat(s.length))
-        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, (s) => ' '.repeat(s.length));
-      while ((m = tagRe.exec(cleaned)) !== null) {
-        const tag = m[1].toLowerCase();
-        const isClose = m[0].startsWith('</');
-        const isSelfClose = m[2] === '/' || voidTags.has(tag);
-        if (isSelfClose && !isClose) continue;
-        if (isClose) {
-          if (stack.length === 0) {
-            issues.push({
-              line: findLine(m.index) + 1, col: 1,
-              snippet: m[0],
-              hint: `Balise fermante </${tag}> sans ouverture correspondante.`
-            });
-          } else {
-            const top = stack[stack.length - 1];
-            if (top.tag === tag) {
-              stack.pop();
-            } else {
-              issues.push({
-                line: findLine(m.index) + 1, col: 1,
-                snippet: m[0],
-                hint: `Imbrication incorrecte : </${tag}> ferme alors que <${top.tag}> est encore ouvert (ligne ${top.line}).`
-              });
-              stack.pop();
-            }
-          }
-        } else {
-          stack.push({ tag, line: findLine(m.index) + 1 });
-        }
-      }
-      // Restant en pile
-      stack.forEach(s => {
-        issues.push({
-          line: s.line, col: 1,
-          snippet: `<${s.tag}>`,
-          hint: `Balise <${s.tag}> jamais fermée.`
-        });
-      });
-      return issues;
-    },
-    fix: null // Trop risqué d'auto-fixer la structure
-  },
+// Metadonnees des regles, peuplees au demarrage par loadRulesFromServer().
+// Les fonctions detect/fix vivent dans AspxLint.Core (cote serveur).
+let RULES = [];
 
-  /* ---------- ATTRIBUTS ---------- */
-  {
-    id: 'ATTR-001',
-    name: 'Attribut sans guillemets',
-    severity: 'warning',
-    desc: "Les valeurs d'attributs doivent toujours être entre guillemets doubles pour respecter XHTML. Sinon les caractères spéciaux et espaces posent problème.",
-    detect: (content, lines) => {
-      const issues = [];
-      // attr=valeur (sans " ou ')
-      const re = /\s([a-zA-Z][a-zA-Z0-9\-:_]*)=([^\s"'<>=\/]+)/g;
-      lines.forEach((line, i) => {
-        // Ignorer commentaires et code serveur
-        if (/<!--|-->/.test(line)) return;
-        // Ignorer la directive
-        if (/<%@/.test(line)) return;
-        let m;
-        const lineRe = new RegExp(re.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          // Vérifier qu'on est bien dans une balise
-          const before = line.substring(0, m.index);
-          const lastOpen = before.lastIndexOf('<');
-          const lastClose = before.lastIndexOf('>');
-          if (lastOpen <= lastClose) continue;
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0].trim(),
-            hint: `Entourer la valeur de guillemets : ${m[1]}="${m[2]}"`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      // On évite de toucher au code serveur <% %>
-      const segments = [];
-      let lastEnd = 0;
-      const aspRe = /<%[\s\S]*?%>/g;
-      let m;
-      while ((m = aspRe.exec(content)) !== null) {
-        segments.push({ type: 'code', text: content.substring(lastEnd, m.index) });
-        segments.push({ type: 'asp', text: m[0] });
-        lastEnd = m.index + m[0].length;
-      }
-      segments.push({ type: 'code', text: content.substring(lastEnd) });
-
-      const fixSegment = (text) => {
-        return text.replace(/(<[a-zA-Z][a-zA-Z0-9:_\-]*\b)([^>]*)>/g, (full, head, attrs) => {
-          const fixedAttrs = attrs.replace(/\s([a-zA-Z][a-zA-Z0-9\-:_]*)=([^\s"'<>=\/]+)/g, (mm, name, val) => {
-            return ` ${name}="${val}"`;
-          });
-          return head + fixedAttrs + '>';
-        });
-      };
-      return segments.map(s => s.type === 'code' ? fixSegment(s.text) : s.text).join('');
-    }
-  },
-  {
-    id: 'ATTR-002',
-    name: 'Mélange guillemets simples / doubles',
-    severity: 'info',
-    desc: "Pour la cohérence du code, utilisez systématiquement les guillemets doubles (\") pour les attributs HTML/ASP.NET. Les guillemets simples sont valides mais inhabituels.",
-    detect: (content, lines) => {
-      const issues = [];
-      lines.forEach((line, i) => {
-        // Ignorer les guillemets simples dans une chaîne C# (côté serveur)
-        if (/<%[\s\S]*?%>/.test(line)) {
-          // Plus complexe — on saute cette ligne pour cette règle
-          return;
-        }
-        const re = /\s([a-zA-Z][a-zA-Z0-9\-:_]*)='([^']*)'/g;
-        let m;
-        while ((m = re.exec(line)) !== null) {
-          const before = line.substring(0, m.index);
-          const lastOpen = before.lastIndexOf('<');
-          const lastClose = before.lastIndexOf('>');
-          if (lastOpen <= lastClose) continue;
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0].trim(),
-            hint: `Préférer "${m[1]}=\\"${m[2]}\\""`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      // Remplacer attr='val' par attr="val" hors code serveur
-      return content.replace(/(<[a-zA-Z][a-zA-Z0-9:_\-]*\b[^>]*?)>/g, (full, body) => {
-        const fixedBody = body.replace(/\s([a-zA-Z][a-zA-Z0-9\-:_]*)='([^']*)'/g,
-          (m, name, val) => ` ${name}="${val.replace(/"/g, '&quot;')}"`);
-        return fixedBody + '>';
-      });
-    }
-  },
-  {
-    id: 'ATTR-003',
-    name: 'Attributs en double dans une balise',
-    severity: 'error',
-    desc: "Une même balise ne doit pas contenir deux fois le même attribut. Le navigateur ne conserve généralement que le premier, ce qui cause des bugs subtils.",
-    detect: (content, lines) => {
-      const issues = [];
-      const tagRe = /<([a-zA-Z][a-zA-Z0-9:_\-]*)\b([^>]*?)>/g;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(tagRe.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          const attrs = m[2];
-          const seen = new Map();
-          const attrRe = /\s([a-zA-Z][a-zA-Z0-9\-:_]*)\s*=/g;
-          let am;
-          while ((am = attrRe.exec(attrs)) !== null) {
-            const name = am[1].toLowerCase();
-            if (seen.has(name)) {
-              issues.push({
-                line: i + 1, col: m.index + 1,
-                snippet: m[0].length > 80 ? m[0].substring(0, 80) + '…' : m[0],
-                hint: `L'attribut "${am[1]}" apparaît plusieurs fois dans cette balise.`
-              });
-              break; // un par balise suffit
-            }
-            seen.set(name, true);
-          }
-        }
-      });
-      return issues;
-    },
-    fix: null // Suppression risquée — on laisse manuel
-  },
-
-  /* ---------- ASP.NET CONTROLS ---------- */
-  {
-    id: 'ASP-001',
-    name: 'Contrôle serveur sans runat="server"',
-    severity: 'error',
-    desc: "Tout contrôle <asp:...> doit avoir l'attribut runat=\"server\", sinon il est traité comme du HTML littéral et n'a aucun comportement serveur.",
-    detect: (content, lines) => {
-      const issues = [];
-      const re = /<asp:([a-zA-Z]+)\b([^>]*?)\/?>/g;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          if (!/runat\s*=\s*["']?server["']?/i.test(m[2])) {
-            issues.push({
-              line: i + 1, col: m.index + 1,
-              snippet: m[0],
-              hint: `Ajouter runat="server" au contrôle <asp:${m[1]}>`
-            });
-          }
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      return content.replace(/<asp:([a-zA-Z]+)\b([^>]*?)(\s*\/?)>/g, (m, tag, attrs, slash) => {
-        if (/\brunat\s*=\s*["']?server["']?/i.test(attrs)) return m;
-        const cleanAttrs = attrs.replace(/\s+$/, '');
-        const tail = slash.includes('/') ? ' />' : '>';
-        return `<asp:${tag}${cleanAttrs} runat="server"${tail}`;
-      });
-    }
-  },
-  {
-    id: 'ASP-002',
-    name: 'ID de contrôle serveur dupliqué',
-    severity: 'error',
-    desc: "Deux contrôles serveur dans la même page (hors templates répétés) ne peuvent pas avoir le même ID — cela provoque une erreur de compilation ASP.NET.",
-    detect: (content, lines) => {
-      const issues = [];
-      const ids = new Map();
-      const re = /<(asp:[a-zA-Z]+|[a-zA-Z]+)\b[^>]*\bID\s*=\s*["']([^"']+)["'][^>]*\brunat\s*=\s*["']?server["']?/gi;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          const id = m[2];
-          if (ids.has(id)) {
-            issues.push({
-              line: i + 1, col: m.index + 1,
-              snippet: m[0].length > 80 ? m[0].substring(0, 80) + '…' : m[0],
-              hint: `ID "${id}" déjà utilisé ligne ${ids.get(id)}.`
-            });
-          } else {
-            ids.set(id, i + 1);
-          }
-        }
-      });
-      return issues;
-    },
-    fix: null // Renommage trop arbitraire
-  },
-  {
-    id: 'ASP-003',
-    name: 'ContentPlaceHolder sans ID (MASTER)',
-    severity: 'error',
-    desc: "Dans un fichier MASTER, chaque <asp:ContentPlaceHolder> doit avoir un attribut ID unique pour que les pages enfants puissent y injecter du contenu.",
-    detect: (content, lines, ctx) => {
-      if (ctx.ext !== 'master') return [];
-      const issues = [];
-      const re = /<asp:ContentPlaceHolder\b([^>]*?)\/?>/gi;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          if (!/\bID\s*=\s*["'][^"']+["']/i.test(m[1])) {
-            issues.push({
-              line: i + 1, col: m.index + 1,
-              snippet: m[0],
-              hint: `Ajouter un attribut ID unique à ce ContentPlaceHolder.`
-            });
-          }
-        }
-      });
-      return issues;
-    },
-    fix: null
-  },
-  {
-    id: 'ASP-004',
-    name: 'Content sans ContentPlaceHolderID (page enfant)',
-    severity: 'error',
-    desc: "Une balise <asp:Content> doit référencer un placeholder du master via ContentPlaceHolderID, sinon la page ne saura pas où injecter le contenu.",
-    detect: (content, lines) => {
-      const issues = [];
-      const re = /<asp:Content\b([^>]*?)>/gi;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          if (!/ContentPlaceHolderID\s*=\s*["'][^"']+["']/i.test(m[1])) {
-            issues.push({
-              line: i + 1, col: m.index + 1,
-              snippet: m[0],
-              hint: `Ajouter ContentPlaceHolderID="..." pointant vers un placeholder du master.`
-            });
-          }
-        }
-      });
-      return issues;
-    },
-    fix: null
-  },
-  {
-    id: 'ASP-005',
-    name: 'Espace dans la directive ASP <% %>',
-    severity: 'warning',
-    desc: "Pour la lisibilité, un espace est recommandé après <% et avant %> dans les blocs de code serveur (<%= valeur %> plutôt que <%=valeur%>).",
-    detect: (content, lines) => {
-      const issues = [];
-      const re = /<%[=#:]?([^\s])[^%]*?([^\s])%>/g;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          if (m[0].includes('@')) continue; // skip directives
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0],
-            hint: `Espace recommandé après <% et avant %>.`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      return content.replace(/<%([=#:]?)([^\s%][^%]*?[^\s%])%>/g, (m, prefix, body) => {
-        if (m.includes('@')) return m;
-        return `<%${prefix} ${body} %>`;
-      });
-    }
-  },
-
-  /* ---------- WHITESPACE ---------- */
-  {
-    id: 'WS-001',
-    name: 'Espaces en fin de ligne',
-    severity: 'info',
-    desc: "Les espaces ou tabulations en fin de ligne polluent les diffs Git et n'apportent rien de visuel. Ils doivent être supprimés.",
-    detect: (content, lines) => {
-      const issues = [];
-      lines.forEach((line, i) => {
-        if (/[ \t]+$/.test(line)) {
-          issues.push({
-            line: i + 1, col: line.replace(/[ \t]+$/, '').length + 1,
-            snippet: line.length > 60 ? '…' + line.slice(-30) + '⎵' : line + '⎵',
-            hint: `Supprimer les ${line.match(/[ \t]+$/)[0].length} caractère(s) blanc(s) en fin de ligne.`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      return content.split(/\r?\n/).map(l => l.replace(/[ \t]+$/, '')).join('\n');
-    }
-  },
-  {
-    id: 'WS-002',
-    name: 'Indentation mixte (tabulations + espaces)',
-    severity: 'warning',
-    desc: "Mélanger tabulations et espaces dans l'indentation d'un même fichier rend l'affichage variable selon l'éditeur. Choisir l'un ou l'autre.",
-    detect: (content, lines) => {
-      let hasTab = false, hasSpace = false;
-      const issues = [];
-      lines.forEach((line, i) => {
-        const indent = line.match(/^[ \t]*/)[0];
-        if (indent.includes('\t')) hasTab = true;
-        if (/^ +/.test(line)) hasSpace = true;
-      });
-      if (hasTab && hasSpace) {
-        // Signaler les premières lignes avec indentation incohérente
-        lines.forEach((line, i) => {
-          const indent = line.match(/^[ \t]*/)[0];
-          if (indent.includes('\t') && indent.includes(' ')) {
-            issues.push({
-              line: i + 1, col: 1,
-              snippet: '⇥ + ⎵ ' + line.trim().substring(0, 50),
-              hint: `Cette ligne mélange tabulations et espaces dans son indentation.`
-            });
-          }
-        });
-        if (issues.length === 0) {
-          // Au moins signaler une fois
-          const firstTab = lines.findIndex(l => /^\t/.test(l));
-          const firstSpace = lines.findIndex(l => /^ /.test(l));
-          if (firstTab >= 0) issues.push({
-            line: firstTab + 1, col: 1,
-            snippet: '⇥ ' + lines[firstTab].trim().substring(0, 50),
-            hint: `Le fichier mélange indentation par tabulation (ici) et par espaces (ligne ${firstSpace + 1}).`
-          });
-        }
-      }
-      return issues;
-    },
-    fix: (content) => {
-      // Convertir tous les tabs en 4 espaces
-      return content.split(/\r?\n/).map(l => {
-        const indentMatch = l.match(/^[ \t]+/);
-        if (!indentMatch) return l;
-        const indent = indentMatch[0].replace(/\t/g, '    ');
-        return indent + l.substring(indentMatch[0].length);
-      }).join('\n');
-    }
-  },
-  {
-    id: 'WS-003',
-    name: 'Lignes vides multiples (>2)',
-    severity: 'info',
-    desc: "Plus de 2 lignes vides consécutives dégradent la lisibilité sans apporter de séparation visuelle utile.",
-    detect: (content, lines) => {
-      const issues = [];
-      let consec = 0;
-      let startLine = -1;
-      lines.forEach((line, i) => {
-        if (line.trim() === '') {
-          if (consec === 0) startLine = i + 1;
-          consec++;
-        } else {
-          if (consec > 2) {
-            issues.push({
-              line: startLine, col: 1,
-              snippet: `${consec} lignes vides consécutives`,
-              hint: `Réduire à au maximum 2 lignes vides.`
-            });
-          }
-          consec = 0;
-        }
-      });
-      if (consec > 2) {
-        issues.push({
-          line: startLine, col: 1,
-          snippet: `${consec} lignes vides en fin de fichier`,
-          hint: `Réduire à au maximum 2 lignes vides.`
-        });
-      }
-      return issues;
-    },
-    fix: (content) => {
-      return content.replace(/(\r?\n[ \t]*){3,}/g, '\n\n\n');
-    }
-  },
-  {
-    id: 'WS-004',
-    name: 'Pas de saut de ligne final',
-    severity: 'info',
-    desc: "POSIX recommande qu'un fichier texte se termine par un saut de ligne. Sinon, certains outils Unix l'affichent mal et Git signale 'No newline at end of file'.",
-    detect: (content) => {
-      if (content.length === 0) return [];
-      if (!content.endsWith('\n')) {
-        const lines = content.split(/\r?\n/);
-        return [{
-          line: lines.length, col: (lines[lines.length - 1] || '').length + 1,
-          snippet: '⎯ fin de fichier sans \\n',
-          hint: `Ajouter un saut de ligne à la fin du fichier.`
-        }];
-      }
-      return [];
-    },
-    fix: (content) => content.endsWith('\n') ? content : content + '\n'
-  },
-  {
-    id: 'WS-005',
-    name: 'BOM en début de fichier',
-    severity: 'warning',
-    desc: "Un BOM UTF-8 (\\uFEFF) en début de fichier ASPX peut perturber le moteur ASP.NET (espaces parasites avant <!DOCTYPE>) ainsi que certains outils de diff.",
-    detect: (content) => {
-      if (content.charCodeAt(0) === 0xFEFF) {
-        return [{
-          line: 1, col: 1,
-          snippet: '\\uFEFF (BOM)',
-          hint: `Enregistrer le fichier en UTF-8 sans BOM.`
-        }];
-      }
-      return [];
-    },
-    fix: (content) => content.replace(/^\uFEFF/, '')
-  },
-
-  /* ---------- ENCODAGE & CARACTÈRES ---------- */
-  {
-    id: 'CHAR-001',
-    name: '& non échappé en dehors d\'une entité',
-    severity: 'warning',
-    desc: "Le caractère & doit être encodé en &amp; sauf s'il commence une entité (&lt;, &amp;, &#123;...). Sinon, validation XHTML invalide.",
-    detect: (content, lines) => {
-      const issues = [];
-      // & non suivi d'une entité valide
-      const re = /&(?!(?:[a-zA-Z][a-zA-Z0-9]{1,8}|#\d+|#x[0-9a-fA-F]+);)/g;
-      lines.forEach((line, i) => {
-        // Ignorer code serveur
-        if (/<%[\s\S]*?%>/.test(line)) return;
-        let m;
-        const lineRe = new RegExp(re.source, 'g');
-        while ((m = lineRe.exec(line)) !== null) {
-          // Skip dans les attributs ASP comme NavigateUrl="?a=1&b=2" (techniquement on devrait l'encoder mais c'est super courant)
-          // On signale quand même mais en info
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: line.substring(Math.max(0, m.index - 5), Math.min(line.length, m.index + 10)),
-            hint: `Encoder ce "&" en "&amp;" si dans du contenu HTML.`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: null // Risqué (peut casser des URLs intentionnelles)
-  },
-
-  /* ---------- COMMENTAIRES ---------- */
-  {
-    id: 'COM-001',
-    name: 'Commentaire HTML imbriqué (-- dans <!-- -->)',
-    severity: 'warning',
-    desc: "La séquence -- ne doit pas apparaître à l'intérieur d'un commentaire HTML <!-- -->. Cela invalide le commentaire selon la spec XHTML.",
-    detect: (content, lines) => {
-      const issues = [];
-      const re = /<!--([\s\S]*?)-->/g;
-      let m;
-      const lineStarts = [0];
-      for (let i = 0; i < content.length; i++) {
-        if (content[i] === '\n') lineStarts.push(i + 1);
-      }
-      const lineFromOffset = (off) => {
-        for (let i = lineStarts.length - 1; i >= 0; i--) {
-          if (off >= lineStarts[i]) return i + 1;
-        }
-        return 1;
-      };
-      while ((m = re.exec(content)) !== null) {
-        if (m[1].includes('--')) {
-          issues.push({
-            line: lineFromOffset(m.index), col: 1,
-            snippet: m[0].length > 60 ? m[0].substring(0, 60) + '…' : m[0],
-            hint: `Le commentaire contient "--", ce qui est invalide en XHTML strict.`
-          });
-        }
-      }
-      return issues;
-    },
-    fix: null
-  },
-
-  /* ---------- VIEWSTATE & SECURITY ---------- */
-  {
-    id: 'SEC-001',
-    name: 'EnableViewStateMac="false" — risque de sécurité',
-    severity: 'error',
-    desc: "Désactiver EnableViewStateMac expose à des attaques par injection de ViewState. Cette option ne doit jamais être à false en production.",
-    detect: (content, lines) => {
-      const issues = [];
-      lines.forEach((line, i) => {
-        const re = /EnableViewStateMac\s*=\s*["']?false["']?/gi;
-        let m;
-        while ((m = re.exec(line)) !== null) {
-          issues.push({
-            line: i + 1, col: m.index + 1,
-            snippet: m[0],
-            hint: `Retirer ou repasser EnableViewStateMac à true.`
-          });
-        }
-      });
-      return issues;
-    },
-    fix: (content) => content.replace(/EnableViewStateMac\s*=\s*["']?false["']?/gi, 'EnableViewStateMac="true"')
-  },
-
-  /* ---------- DOCTYPE ---------- */
-  {
-    id: 'DOC-001',
-    name: 'DOCTYPE manquant (ASPX seulement)',
-    severity: 'warning',
-    desc: "Un fichier ASPX standalone (non-Content) devrait déclarer un DOCTYPE pour activer le mode standards des navigateurs.",
-    detect: (content, lines, ctx) => {
-      if (ctx.ext !== 'aspx') return [];
-      // Si c'est une content page (a une directive avec MasterPageFile), on saute
-      if (/MasterPageFile\s*=/i.test(content)) return [];
-      // Si déjà un DOCTYPE, ok
-      if (/<!DOCTYPE/i.test(content)) return [];
-      // Si pas de <html, c'est probablement un partial — ok aussi
-      if (!/<html\b/i.test(content)) return [];
-      return [{
-        line: 1, col: 1,
-        snippet: '(absence de <!DOCTYPE>)',
-        hint: `Ajouter "<!DOCTYPE html>" avant la balise <html>.`
-      }];
-    },
-    fix: (content, ctx) => {
-      if (ctx.ext !== 'aspx') return content;
-      if (/<!DOCTYPE/i.test(content) || /MasterPageFile\s*=/i.test(content) || !/<html\b/i.test(content)) return content;
-      return content.replace(/(<html\b)/i, '<!DOCTYPE html>\n$1');
-    }
-  },
-
-  /* ---------- FORM RUNAT ---------- */
-  {
-    id: 'FORM-001',
-    name: 'Balise <form> sans runat="server" dans une page ASPX',
-    severity: 'error',
-    desc: "Une page ASPX qui utilise des contrôles serveur a besoin d'un <form runat=\"server\"> englobant. Sans cela, le ViewState et les postbacks ne fonctionnent pas.",
-    detect: (content, lines, ctx) => {
-      if (ctx.ext !== 'aspx') return [];
-      // Si la page est un Content (master page child), pas besoin
-      if (/MasterPageFile\s*=/i.test(content)) return [];
-      // Si pas de <asp:..> dans la page, pas pertinent
-      if (!/<asp:/i.test(content)) return [];
-      const issues = [];
-      const re = /<form\b([^>]*?)>/gi;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          if (!/runat\s*=\s*["']?server["']?/i.test(m[1])) {
-            issues.push({
-              line: i + 1, col: m.index + 1,
-              snippet: m[0],
-              hint: `Ajouter runat="server" à la balise <form>.`
-            });
-          }
-        }
-      });
-      return issues;
-    },
-    fix: (content) => {
-      return content.replace(/<form\b([^>]*?)>/gi, (m, attrs) => {
-        if (/\brunat\s*=\s*["']?server["']?/i.test(attrs)) return m;
-        const cleanAttrs = attrs.replace(/\s+$/, '');
-        return `<form${cleanAttrs} runat="server">`;
-      });
-    }
-  },
-
-  /* ---------- SCRIPT MANAGER ---------- */
-  {
-    id: 'SM-001',
-    name: 'Plusieurs ScriptManager dans la page',
-    severity: 'error',
-    desc: "Une page ASP.NET ne peut contenir qu'un seul <asp:ScriptManager>. Pour les content pages avec un master ayant déjà un ScriptManager, utiliser <asp:ScriptManagerProxy>.",
-    detect: (content, lines) => {
-      const matches = [];
-      const re = /<asp:ScriptManager\b/gi;
-      lines.forEach((line, i) => {
-        let m;
-        const lineRe = new RegExp(re.source, 'gi');
-        while ((m = lineRe.exec(line)) !== null) {
-          matches.push({ line: i + 1, col: m.index + 1, text: line.substring(m.index).split('>')[0] + '>' });
-        }
-      });
-      if (matches.length > 1) {
-        return matches.slice(1).map(mm => ({
-          line: mm.line, col: mm.col,
-          snippet: mm.text,
-          hint: `Un ScriptManager existe déjà ligne ${matches[0].line}. Utiliser ScriptManagerProxy ici.`
-        }));
-      }
-      return [];
-    },
-    fix: null
+async function loadRulesFromServer() {
+  try {
+    const r = await fetch('/api/rules');
+    if (r.ok) RULES = await r.json();
+  } catch (e) {
+    console.warn('Impossible de charger /api/rules :', e);
   }
-];
+}
 
 /* ============================================================
    ÉTAT GLOBAL
@@ -1780,42 +1011,44 @@ let fileIdSeq = 1;
 /* ============================================================
    ANALYSE
    ============================================================ */
-function analyzeFile(file) {
-  const lines = file.current.split(/\r?\n/);
-  const ctx = { ext: file.ext };
-  const allIssues = [];
-  let issueIdSeq = 1;
-
-  for (const rule of RULES) {
-    try {
-      const detected = rule.detect(file.current, lines, ctx) || [];
-      for (const d of detected) {
-        allIssues.push({
-          id: `i${issueIdSeq++}`,
-          ruleId: rule.id,
-          ruleName: rule.name,
-          severity: rule.severity,
-          desc: rule.desc,
-          line: d.line,
-          col: d.col || 1,
-          snippet: d.snippet,
-          hint: d.hint,
-          fixable: !!rule.fix,
-          fixed: false
-        });
-      }
-    } catch (e) {
-      console.warn('Règle', rule.id, 'a échoué', e);
+async function analyzeFile(file) {
+  let data;
+  try {
+    const r = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: file.current, ext: file.ext })
+    });
+    if (!r.ok) {
+      console.warn('analyze HTTP', r.status);
+      return [];
     }
+    data = await r.json();
+  } catch (e) {
+    console.warn('analyze échoué :', e);
+    return [];
   }
 
-  // Trier par ligne
-  allIssues.sort((a, b) => a.line - b.line);
-  return allIssues;
+  let id = 1;
+  return (data.issues || [])
+    .map(i => ({
+      id: `i${id++}`,
+      ruleId: i.ruleId,
+      ruleName: i.ruleName,
+      severity: i.severity,
+      desc: RULES.find(r => r.id === i.ruleId)?.desc || '',
+      line: i.line,
+      col: i.col || 1,
+      snippet: i.snippet,
+      hint: i.hint,
+      fixable: !!RULES.find(r => r.id === i.ruleId)?.hasFix,
+      fixed: false
+    }))
+    .sort((a, b) => a.line - b.line);
 }
 
-function runAnalysis(file) {
-  file.issues = analyzeFile(file);
+async function runAnalysis(file) {
+  file.issues = await analyzeFile(file);
   file.hasRun = true;
 }
 
@@ -1825,37 +1058,43 @@ function runAnalysis(file) {
    applyFix renvoie le nombre de problèmes effectivement résolus
    pour la règle, et empile chacun dans file.history.
    ============================================================ */
-function applyFix(file, ruleId) {
-  const rule = RULES.find(r => r.id === ruleId);
-  if (!rule || !rule.fix) return 0;
+async function applyFix(file, ruleId) {
+  const ruleMeta = RULES.find(r => r.id === ruleId);
+  if (!ruleMeta || !ruleMeta.hasFix) return 0;
 
-  // Snapshot des issues de cette règle AVANT correction
   const beforeIssues = file.issues.filter(i => i.ruleId === ruleId).map(i => ({...i}));
   if (beforeIssues.length === 0) return 0;
 
-  const beforeContent = file.current;
-  let afterContent;
+  let data;
   try {
-    afterContent = rule.fix(file.current, { ext: file.ext });
+    const r = await fetch('/api/fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: file.current, ext: file.ext, ruleId })
+    });
+    if (!r.ok) {
+      console.warn('fix HTTP', r.status);
+      return 0;
+    }
+    data = await r.json();
   } catch (e) {
-    console.warn('Fix', rule.id, 'a échoué', e);
+    console.warn('fix échoué :', e);
     return 0;
   }
-  if (afterContent === beforeContent) return 0;
 
-  file.current = afterContent;
-  file.issues = analyzeFile(file);
-  const stillThere = file.issues.filter(i => i.ruleId === ruleId).length;
-  const fixedNow = Math.max(0, beforeIssues.length - stillThere);
+  if (data.content === file.current || data.applied === 0) return 0;
 
-  // Inscrire dans l'historique chaque issue qui a effectivement disparu
+  file.current = data.content;
+  await runAnalysis(file);
+
+  const fixedNow = data.applied;
   for (let k = 0; k < fixedNow && k < beforeIssues.length; k++) {
     const orig = beforeIssues[k];
     file.history.push({
-      ruleId: rule.id,
-      ruleName: rule.name,
-      severity: rule.severity,
-      desc: rule.desc,
+      ruleId: ruleMeta.id,
+      ruleName: ruleMeta.name,
+      severity: ruleMeta.severity,
+      desc: ruleMeta.desc,
       line: orig.line,
       col: orig.col,
       snippet: orig.snippet,
@@ -1866,18 +1105,44 @@ function applyFix(file, ruleId) {
   return fixedNow;
 }
 
-function applyAllFixes(file) {
-  let total = 0;
-  // Plusieurs passes : certaines corrections en débloquent d'autres
-  for (let pass = 0; pass < 5; pass++) {
-    let passCount = 0;
-    for (const rule of RULES) {
-      if (!rule.fix) continue;
-      passCount += applyFix(file, rule.id);
+async function applyAllFixes(file) {
+  let data;
+  try {
+    const r = await fetch('/api/fix-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: file.current, ext: file.ext })
+    });
+    if (!r.ok) {
+      console.warn('fix-all HTTP', r.status);
+      return 0;
     }
-    total += passCount;
-    if (passCount === 0) break;
+    data = await r.json();
+  } catch (e) {
+    console.warn('fix-all échoué :', e);
+    return 0;
   }
+
+  if (data.content === file.current) return 0;
+  file.current = data.content;
+
+  // Historique : on n'a pas le détail des issues effacées (seulement le total
+  // par règle), donc on enregistre une entrée synthétique par groupe.
+  const total = (data.history || []).reduce((s, h) => s + h.count, 0);
+  for (const h of data.history || []) {
+    const meta = RULES.find(r => r.id === h.ruleId) || { id: h.ruleId, name: h.ruleId, severity: 'info', desc: '' };
+    for (let k = 0; k < h.count; k++) {
+      file.history.push({
+        ruleId: meta.id,
+        ruleName: meta.name,
+        severity: meta.severity,
+        desc: meta.desc,
+        fixedAt: Date.now()
+      });
+    }
+  }
+
+  await runAnalysis(file);
   return total;
 }
 
@@ -2344,10 +1609,10 @@ function jumpToLine(line) {
   }
 }
 
-function applySingleFix(ruleId) {
+async function applySingleFix(ruleId) {
   const file = currentFile();
   if (!file) return;
-  const fixed = applyFix(file, ruleId);
+  const fixed = await applyFix(file, ruleId);
   if (fixed > 0) {
     showToast(`${fixed} correction(s) appliquée(s).`, 'success');
     setVerifyStatus('idle', '⊙ revérification disponible');
@@ -2357,10 +1622,10 @@ function applySingleFix(ruleId) {
   }
 }
 
-function fixAllInCurrent() {
+async function fixAllInCurrent() {
   const file = currentFile();
   if (!file) return;
-  const total = applyAllFixes(file);
+  const total = await applyAllFixes(file);
   if (total > 0) {
     showToast(`${total} problème(s) corrigé(s) automatiquement.`, 'success');
     setVerifyStatus('idle', '⊙ revérification disponible');
@@ -2370,37 +1635,34 @@ function fixAllInCurrent() {
   }
 }
 
-function verifyCurrent() {
+async function verifyCurrent() {
   const file = currentFile();
   if (!file) return;
   setVerifyStatus('running', '◐ vérification en cours…');
   $('btnVerify').disabled = true;
 
-  // Petit délai visuel pour montrer que ça travaille
-  setTimeout(() => {
-    file.issues = analyzeFile(file);
-    const remaining = file.issues.length;
-    const autoFixable = file.issues.filter(i => RULES.find(r => r.id === i.ruleId)?.fix).length;
-    const manual = remaining - autoFixable;
-    const fixedTotal = file.history.length;
+  // L'appel reseau remplace le delai artificiel d'avant
+  file.issues = await analyzeFile(file);
+  const remaining = file.issues.length;
+  const autoFixable = file.issues.filter(i => RULES.find(r => r.id === i.ruleId)?.hasFix).length;
+  const manual = remaining - autoFixable;
+  const fixedTotal = file.history.length;
 
-    if (remaining === 0) {
-      setVerifyStatus('success', `✓ vérifié — fichier propre`);
-      showToast(`Vérification réussie : ${fixedTotal > 0 ? fixedTotal + ' correction(s) appliquée(s), ' : ''}aucun problème restant.`, 'success');
-    } else if (manual === remaining) {
-      // Toutes les issues restantes nécessitent une correction manuelle
-      setVerifyStatus('success', `✓ vérifié — ${manual} à corriger manuellement`);
-      showToast(`${fixedTotal} corrigé(s), ${manual} nécessite(nt) une correction manuelle.`, 'success');
-    } else {
-      const errors = file.issues.filter(i => i.severity === 'error').length;
-      setVerifyStatus(errors > 0 ? 'failed' : 'success',
-        errors > 0
-          ? `✗ ${errors} erreur(s), ${remaining - errors} avert. — ${autoFixable} auto-corrigeable(s)`
-          : `✓ vérifié — ${remaining} avert/info restant`);
-    }
-    $('btnVerify').disabled = false;
-    renderAll();
-  }, 350);
+  if (remaining === 0) {
+    setVerifyStatus('success', `✓ vérifié — fichier propre`);
+    showToast(`Vérification réussie : ${fixedTotal > 0 ? fixedTotal + ' correction(s) appliquée(s), ' : ''}aucun problème restant.`, 'success');
+  } else if (manual === remaining) {
+    setVerifyStatus('success', `✓ vérifié — ${manual} à corriger manuellement`);
+    showToast(`${fixedTotal} corrigé(s), ${manual} nécessite(nt) une correction manuelle.`, 'success');
+  } else {
+    const errors = file.issues.filter(i => i.severity === 'error').length;
+    setVerifyStatus(errors > 0 ? 'failed' : 'success',
+      errors > 0
+        ? `✗ ${errors} erreur(s), ${remaining - errors} avert. — ${autoFixable} auto-corrigeable(s)`
+        : `✓ vérifié — ${remaining} avert/info restant`);
+  }
+  $('btnVerify').disabled = false;
+  renderAll();
 }
 
 function setVerifyStatus(cls, text) {
@@ -2415,7 +1677,7 @@ function setVerifyStatus(cls, text) {
 async function handleFiles(fileList) {
   for (const f of fileList) {
     const text = await f.text();
-    addFile(f.name, text);
+    await addFile(f.name, text);
   }
   if (state.files.length > 0 && !state.currentFileId) {
     state.currentFileId = state.files[0].id;
@@ -2423,7 +1685,7 @@ async function handleFiles(fileList) {
   renderAll();
 }
 
-function addFile(name, content, serverPath = null) {
+async function addFile(name, content, serverPath = null) {
   const ext = fileExtFromName(name);
   const file = {
     id: 'f' + (fileIdSeq++),
@@ -2436,20 +1698,15 @@ function addFile(name, content, serverPath = null) {
     hasRun: false,
     serverPath    // chemin disque cote serveur, null pour les fichiers uploades manuellement
   };
-  runAnalysis(file);
   state.files.push(file);
+  await runAnalysis(file);
+  return file;
 }
 
 /* ============================================================
-   SCAN SERVEUR — visible uniquement quand on tourne derrière
-   AspxLint.Server (mode http(s):) et masqué en mode file://.
-   Le serveur retourne le CONTENU de chaque fichier ; on le passe
-   ensuite à addFile() qui re-fait l'analyse JS complète (les 23
-   règles côté navigateur), donc l'expérience est identique à un
-   upload manuel — juste en bulk et sans clic.
+   SCAN SERVEUR — appel /api/scan, recoit content + issues,
+   passe a addFile() qui fait l'analyse via /api/analyze.
    ============================================================ */
-const SERVER_MODE =
-  location.protocol === 'http:' || location.protocol === 'https:';
 
 async function scanServerFolder() {
   const path = prompt('Chemin du dossier à scanner (sur la machine du serveur) :', '');
@@ -2480,10 +1737,10 @@ async function scanServerFolder() {
   }
 
   const beforeCount = state.files.length;
-  data.files.forEach(sf => {
+  for (const sf of data.files) {
     const name = sf.relativePath || (sf.path || '').split(/[\\/]/).pop() || 'inconnu';
-    addFile(name, sf.content, sf.path);
-  });
+    await addFile(name, sf.content, sf.path);
+  }
   if (state.files.length > beforeCount) {
     state.currentFileId = state.files[beforeCount].id;
   }
@@ -2629,11 +1886,11 @@ function exportReport() {
    ============================================================ */
 function openPasteModal() { $('pasteModal').classList.add('show'); }
 function closePasteModal() { $('pasteModal').classList.remove('show'); }
-function addPastedFile() {
+async function addPastedFile() {
   const name = $('pasteFileName').value.trim() || 'snippet.aspx';
   const content = $('pasteContent').value;
   if (!content.trim()) { showToast('Contenu vide.', 'error'); return; }
-  addFile(name, content);
+  await addFile(name, content);
   state.currentFileId = state.files[state.files.length - 1].id;
   $('pasteContent').value = '';
   closePasteModal();
@@ -2650,7 +1907,7 @@ function openRulesModal() {
         <span class="rule-id">${r.id}</span>
         <span class="rule-name">${escapeHtml(r.name)}</span>
         <span class="issue-severity ${r.severity}" style="margin-left:8px">${r.severity}</span>
-        ${r.fix ? '<span class="issue-severity info" style="background:transparent;color:var(--accent);border:1px solid var(--accent)">auto-fix</span>' : ''}
+        ${r.hasFix ? '<span class="issue-severity info" style="background:transparent;color:var(--accent);border:1px solid var(--accent)">auto-fix</span>' : ''}
       </div>
       <div class="rule-desc">${escapeHtml(r.desc)}</div>
     </div>
@@ -2658,7 +1915,7 @@ function openRulesModal() {
 }
 function closeRulesModal() { $('rulesModal').classList.remove('show'); }
 
-function loadDemo() {
+async function loadDemo() {
   const demoAspx = `<%@ Page Language="C#" AutoEventWireup=true CodeBehind="Default.aspx.cs" Inherits="MyApp.Default"%>
 <!DOCTYPE html>
 <HTML xmlns="http://www.w3.org/1999/xhtml">
@@ -2718,9 +1975,9 @@ function loadDemo() {
     <asp:LoginStatus ID="LoginStatus1" />
 </nav>`;
 
-  addFile('Default.aspx', demoAspx);
-  addFile('Site.master', demoMaster);
-  addFile('Menu.ascx', demoAscx);
+  await addFile('Default.aspx', demoAspx);
+  await addFile('Site.master', demoMaster);
+  await addFile('Menu.ascx', demoAscx);
   state.currentFileId = state.files[state.files.length - 3].id;
   renderAll();
   showToast('3 exemples chargés.', 'success');
@@ -2777,17 +2034,13 @@ document.addEventListener('keydown', (e) => {
 
 initDragDrop();
 
-// Affiche les boutons de mode serveur si on est servi par AspxLint.Server.
-if (SERVER_MODE) {
-  const btnScan = document.getElementById('btnScanServer');
-  if (btnScan) btnScan.style.display = '';
-  const btnSave = document.getElementById('btnSaveServer');
-  if (btnSave) btnSave.style.display = '';
-  const btnRestore = document.getElementById('btnRestoreServer');
-  if (btnRestore) btnRestore.style.display = '';
-}
-
-renderAll();
+// Bootstrap : on load les regles depuis /api/rules, puis on rend l'UI.
+// La dashboard tourne toujours derriere AspxLint.Server (file:// bloque tout
+// au debut du script).
+(async () => {
+  await loadRulesFromServer();
+  renderAll();
+})();
 </script>
 </body>
 </html>
