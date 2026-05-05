@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
     <ProjectReference Include="..\AspxLint.Core\AspxLint.Core.csproj" />
   </ItemGroup>
 
