@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <!-- Couvrir AspxLint.Core et AspxLint.Server uniquement.
+               Include explicite parce que WebApplicationFactory charge
+               AspxLint.Server.dll par reflexion et coverlet le rate sans hint. -->
+          <Include>[AspxLint.Core]*,[AspxLint.Server]*</Include>
+          <Exclude>[xunit*]*,[AspxLint.*.Tests]*,[AspxLint.Desktop]*</Exclude>
+          <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute</ExcludeByAttribute>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

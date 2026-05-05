@@ -1,0 +1,118 @@
+name: release
+
+# Declenche sur push de tag vX.Y.Z (exemple : v0.2.0).
+# Build CLI + Desktop, lance la suite de tests, cree une GitHub Release
+# et pousse le .nupkg sur NuGet.org.
+#
+# Pre-requis :
+#   - Secret repo `NUGET_API_KEY` valide (genere depuis nuget.org > API Keys).
+#   - Permission `contents: write` sur le job (set ci-dessous).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (sans le prefix v, ex: 0.2.0). Utilise pour les runs manuels.'
+        required: true
+        default: '0.0.0-dev'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # pour creer la GitHub Release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # ---------------------------------------------------------------
+      # Resolve la version : tag git (vX.Y.Z) ou input manuel
+      # ---------------------------------------------------------------
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version $VERSION"
+
+      - name: Restore + build
+        run: |
+          dotnet restore aspx_lint.sln
+          dotnet build aspx_lint.sln -c Release --no-restore /p:Version=${{ steps.version.outputs.version }}
+
+      # ---------------------------------------------------------------
+      # Tests : on saute Desktop+E2E (lents, deja couverts par la CI principale)
+      # pour que la release soit rapide. Si on echoue ici, pas de release.
+      # ---------------------------------------------------------------
+      - name: Test (Core + Cli + Server)
+        run: >
+          dotnet test aspx_lint.sln
+          --no-build -c Release
+          --filter "FullyQualifiedName!~AspxLint.E2E&FullyQualifiedName!~AspxLint.Desktop"
+
+      # ---------------------------------------------------------------
+      # Build des deux livrables : nupkg CLI + .exe Desktop self-contained
+      # ---------------------------------------------------------------
+      - name: Pack CLI as global tool
+        run: >
+          dotnet pack src/AspxLint.Cli -c Release --no-build
+          --output nupkg
+          /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Publish Desktop as self-contained single-file exe
+        run: >
+          dotnet publish src/AspxLint.Desktop -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -o publish/desktop
+
+      - name: Rename desktop exe with version
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          Move-Item publish/desktop/AspxLint.Desktop.exe "publish/desktop/aspx-lint-desktop-$v-win-x64.exe"
+
+      # ---------------------------------------------------------------
+      # GitHub Release : .nupkg + .exe attaches, release-notes auto-generes
+      # ---------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: aspx-lint v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg
+            publish/desktop/aspx-lint-desktop-${{ steps.version.outputs.version }}-win-x64.exe
+
+      # ---------------------------------------------------------------
+      # Push vers NuGet.org
+      # `--skip-duplicate` evite l'erreur si le tag est rebuild apres coup.
+      # ---------------------------------------------------------------
+      - name: Push to NuGet.org
+        if: github.event_name == 'push'   # uniquement sur tag, pas sur workflow_dispatch
+        run: >
+          dotnet nuget push nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

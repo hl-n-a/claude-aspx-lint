@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AspxLint.Cli</RootNamespace>
+    <AssemblyName>aspx-lint</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Global tool : `dotnet tool install -g aspx-lint` -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>aspx-lint</ToolCommandName>
+
+    <!-- Metadonnees NuGet (la <Version> est derivee par MinVer depuis les tags git,
+         cf. Directory.Build.props a la racine). -->
+    <PackageId>aspx-lint</PackageId>
+    <Authors>hlabaste</Authors>
+    <Description>Linter et auto-fixer pour fichiers ASP.NET Web Forms (.aspx, .ascx, .master). 23 regles couvrant directives, balises XHTML, controles serveur, whitespace, securite ViewState.</Description>
+    <PackageTags>aspnet;webforms;aspx;ascx;master;linter;analyzer;sarif</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AspxLint.Core\AspxLint.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

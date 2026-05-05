@@ -1,0 +1,28 @@
+<Project>
+
+  <!--
+    Versioning : MinVer derive automatiquement la version depuis le tag git
+    le plus proche (vX.Y.Z). Plus besoin de toucher <Version> dans les csproj.
+
+      - Tag actuel `v0.2.0` sur HEAD     => version = 0.2.0
+      - 5 commits apres `v0.2.0`         => version = 0.2.1-alpha.0.5
+      - Pas de repo git / pas de tag     => version = 0.0.0-alpha.0
+                                            (build local "dev")
+
+    En CI release (release.yml), `/p:Version=$VERSION` peut toujours forcer
+    une version explicite, ce qui prend le pas sur MinVer.
+  -->
+
+  <PropertyGroup>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerVerbosity>quiet</MinVerVerbosity>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="6.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

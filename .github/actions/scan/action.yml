@@ -1,0 +1,75 @@
+name: 'aspx-lint scan'
+description: 'Lint ASP.NET Web Forms files (.aspx, .ascx, .master) and upload SARIF to GitHub Code Scanning'
+author: 'hlabaste'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  path:
+    description: 'Directory to scan (recursif).'
+    required: false
+    default: '.'
+  severity:
+    description: 'Minimum severity to fail on (error|warning|info). Vide = aucune issue ne fait echouer.'
+    required: false
+    default: ''
+  output:
+    description: 'Path to write the SARIF report.'
+    required: false
+    default: 'aspx-lint.sarif'
+  upload-sarif:
+    description: 'Upload the SARIF report to GitHub Code Scanning. Necessite security-events:write.'
+    required: false
+    default: 'true'
+  version:
+    description: 'aspx-lint version a installer (vide = derniere stable sur NuGet).'
+    required: false
+    default: ''
+  dotnet-version:
+    description: '.NET SDK version (au cas ou pas deja installe sur le runner).'
+    required: false
+    default: '9.0.x'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup .NET (only if missing)
+      shell: bash
+      run: |
+        if ! command -v dotnet &> /dev/null; then
+          echo "::warning::dotnet introuvable, le runner devrait avoir .NET preinstalle (ou utiliser actions/setup-dotnet en amont)."
+          exit 1
+        fi
+
+    - name: Install aspx-lint as global tool
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.version }}" ]; then
+          dotnet tool install --global aspx-lint --version ${{ inputs.version }}
+        else
+          dotnet tool install --global aspx-lint
+        fi
+        echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+    - name: Run scan (write SARIF, never fail this step)
+      shell: bash
+      run: aspx-lint scan "${{ inputs.path }}" --sarif > "${{ inputs.output }}" 2>/dev/null || true
+
+    - name: Upload SARIF to Code Scanning
+      if: inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+      continue-on-error: true
+
+    - name: Run scan (text, propagate exit code per --severity)
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.severity }}" ]; then
+          aspx-lint scan "${{ inputs.path }}" --severity "${{ inputs.severity }}"
+        else
+          # Pas de filtre => on n'utilise pas l'exit-code de scan (le SARIF + Code
+          # Scanning rules font le job). On affiche juste le rapport texte.
+          aspx-lint scan "${{ inputs.path }}" || true
+        fi

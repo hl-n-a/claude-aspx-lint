@@ -1,0 +1,9 @@
+<%@ Master Language="C#" %>
+<html>
+<head><title>Master</title></head>
+<body>
+<form runat="server">
+<asp:ContentPlaceHolder>Default content</asp:ContentPlaceHolder>
+</form>
+</body>
+</html>

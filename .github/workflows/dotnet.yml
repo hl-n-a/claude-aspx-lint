@@ -1,0 +1,136 @@
+name: build + test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Restore packages
+        run: dotnet restore aspx_lint.sln
+
+      - name: Build
+        run: dotnet build aspx_lint.sln --no-restore --configuration Release
+
+      # ---------------------------------------------------------------
+      # Tests : on lance toute la suite avec coverage. Les tests Desktop
+      # qui requierent une session interactive sont taggues et tournent
+      # quand meme sur le runner Windows (qui a une session GUI).
+      # ---------------------------------------------------------------
+      - name: Install Playwright browsers (Chromium)
+        run: pwsh tests/AspxLint.E2E.Tests/bin/Release/net9.0/playwright.ps1 install chromium
+
+      - name: Run all tests with coverage
+        run: >
+          dotnet test aspx_lint.sln
+          --no-build
+          --configuration Release
+          --collect:"XPlat Code Coverage"
+          --settings coverlet.runsettings
+          --results-directory coverage/raw
+          --logger "trx;LogFileName=test-results.trx"
+          --logger "console;verbosity=normal"
+
+      # ---------------------------------------------------------------
+      # Rapport coverage — HTML pour artefact + Cobertura pour Codecov
+      # ---------------------------------------------------------------
+      - name: Generate coverage report
+        if: always()
+        run: >
+          dotnet reportgenerator
+          "-reports:coverage/raw/**/coverage.cobertura.xml"
+          "-targetdir:coverage/html"
+          "-reporttypes:Html;TextSummary;Cobertura"
+
+      - name: Coverage summary in job log
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path coverage/html/Summary.txt) {
+            Get-Content coverage/html/Summary.txt
+            "## Coverage" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            "``````" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            Get-Content coverage/html/Summary.txt | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            "``````" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage/html
+          retention-days: 14
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/html/Cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: false
+
+      - name: Upload test results (TRX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          retention-days: 14
+
+      # ---------------------------------------------------------------
+      # SARIF : on scanne le code de la solution avec aspx-lint lui-meme,
+      # et on uploade le rapport dans GitHub Code Scanning.
+      # ---------------------------------------------------------------
+      - name: Self-scan with aspx-lint
+        if: always()
+        run: dotnet run --project src/AspxLint.Cli --no-build --configuration Release -- scan tests/fixtures --sarif > aspx-lint.sarif
+
+      - name: Upload SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: aspx-lint.sarif
+        continue-on-error: true
+
+      # ---------------------------------------------------------------
+      # Pack du CLI en global tool NuGet : produit nupkg/aspx-lint.X.Y.Z.nupkg
+      # qu'on uploade en artefact pour pouvoir l'installer ailleurs ou le
+      # pousser sur nuget.org dans une etape ulterieure (release tag).
+      # ---------------------------------------------------------------
+      - name: Pack CLI as NuGet global tool
+        run: dotnet pack src/AspxLint.Cli --configuration Release --no-build --output nupkg
+
+      - name: Upload nupkg artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspx-lint-nupkg
+          path: nupkg/*.nupkg
+          retention-days: 30
+
+      - name: Smoke test the packaged tool
+        run: |
+          dotnet tool install --global --add-source ./nupkg aspx-lint
+          aspx-lint --version
+          aspx-lint scan tests/fixtures --severity error
+        shell: pwsh
+        continue-on-error: true
