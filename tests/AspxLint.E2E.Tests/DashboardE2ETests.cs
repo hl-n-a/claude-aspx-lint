@@ -58,11 +58,11 @@ public class DashboardE2ETests : IClassFixture<E2EFixture>
         await page.Locator("#btnScanServer").ClickAsync();
 
         // Le fichier doit apparaitre dans la sidebar
-        await page.Locator(".file-item").First.WaitForAsync(new() { Timeout = 5000 });
-        var count = await page.Locator(".file-item").CountAsync();
+        await page.Locator(".tree-file").First.WaitForAsync(new() { Timeout = 5000 });
+        var count = await page.Locator(".tree-file").CountAsync();
         Assert.Equal(1, count);
 
-        var name = await page.Locator(".file-item").First.TextContentAsync();
+        var name = await page.Locator(".tree-file").First.TextContentAsync();
         Assert.Contains("test.aspx", name!);
     }
 
@@ -79,10 +79,10 @@ public class DashboardE2ETests : IClassFixture<E2EFixture>
         await page.GotoAsync(_fx.AuthUrl);
         await page.Locator("#btnScanServer").WaitForAsync();
         await page.Locator("#btnScanServer").ClickAsync();
-        await page.Locator(".file-item").First.WaitForAsync();
+        await page.Locator(".tree-file").First.WaitForAsync();
 
         // Selectionner le fichier (souvent fait automatiquement par scanServerFolder)
-        await page.Locator(".file-item").First.ClickAsync();
+        await page.Locator(".tree-file").First.ClickAsync();
 
         // "Tout corriger"
         await page.Locator("#btnFixAll:not([disabled])").WaitForAsync(new() { Timeout = 5000 });
@@ -128,8 +128,8 @@ public class DashboardE2ETests : IClassFixture<E2EFixture>
 
         await page.GotoAsync(_fx.AuthUrl);
         await page.Locator("#btnScanServer").ClickAsync();
-        await page.Locator(".file-item").First.WaitForAsync();
-        await page.Locator(".file-item").First.ClickAsync();
+        await page.Locator(".tree-file").First.WaitForAsync();
+        await page.Locator(".tree-file").First.ClickAsync();
 
         // Fix + Save => cree le .bak
         await page.Locator("#btnFixAll:not([disabled])").WaitForAsync();

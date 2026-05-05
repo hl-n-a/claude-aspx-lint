@@ -8,7 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;1,400;1,600&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
+  :root,
+  [data-theme="default"] {
     --bg: #0c0d0a;
     --bg-2: #14150f;
     --bg-3: #1c1d16;
@@ -31,6 +32,98 @@
     --serif: "Fraunces", Georgia, serif;
     --sans: "Inter", system-ui, sans-serif;
     --mono: "JetBrains Mono", "Courier New", monospace;
+  }
+
+  /* ----- VS Code Dark+ inspiré ----- */
+  [data-theme="vsdark"] {
+    --bg: #1e1e1e;
+    --bg-2: #252526;
+    --bg-3: #2d2d30;
+    --bg-hover: #2a2d2e;
+    --border: #3e3e42;
+    --border-strong: #4c4c50;
+    --text: #d4d4d4;
+    --text-dim: #969696;
+    --text-faint: #6a6a6a;
+    --accent: #569cd6;
+    --accent-dim: #4682b4;
+    --error: #f44747;
+    --error-bg: #3a1818;
+    --warning: #cca700;
+    --warning-bg: #3a2a14;
+    --info: #75beff;
+    --info-bg: #1a2530;
+    --success: #4ec9b0;
+    --success-bg: #182a26;
+  }
+
+  /* ----- Light (papier) ----- */
+  [data-theme="light"] {
+    --bg: #fdfbf6;
+    --bg-2: #f3efe6;
+    --bg-3: #ebe6da;
+    --bg-hover: #e3ddd0;
+    --border: #d6cfbe;
+    --border-strong: #b8b09c;
+    --text: #1a1a17;
+    --text-dim: #5a5a4f;
+    --text-faint: #8b8a7d;
+    --accent: #6e8b00;
+    --accent-dim: #5a7300;
+    --error: #c1272d;
+    --error-bg: #fce4e4;
+    --warning: #b8740c;
+    --warning-bg: #fcf2dc;
+    --info: #1a5fb4;
+    --info-bg: #e0ecfa;
+    --success: #2a7d3a;
+    --success-bg: #e0f2e3;
+  }
+
+  /* ----- Solarized Dark ----- */
+  [data-theme="solarized"] {
+    --bg: #002b36;
+    --bg-2: #073642;
+    --bg-3: #0d4954;
+    --bg-hover: #154d5a;
+    --border: #1d5560;
+    --border-strong: #2d6571;
+    --text: #eee8d5;
+    --text-dim: #93a1a1;
+    --text-faint: #586e75;
+    --accent: #b58900;
+    --accent-dim: #8a6800;
+    --error: #dc322f;
+    --error-bg: #2b1416;
+    --warning: #cb4b16;
+    --warning-bg: #2b1c10;
+    --info: #268bd2;
+    --info-bg: #0f1f2b;
+    --success: #859900;
+    --success-bg: #1b2410;
+  }
+
+  /* ----- Monokai-ish ----- */
+  [data-theme="monokai"] {
+    --bg: #272822;
+    --bg-2: #2d2e27;
+    --bg-3: #34352d;
+    --bg-hover: #3e4039;
+    --border: #44453e;
+    --border-strong: #5a5b51;
+    --text: #f8f8f2;
+    --text-dim: #a59f85;
+    --text-faint: #75715e;
+    --accent: #a6e22e;
+    --accent-dim: #82b81b;
+    --error: #f92672;
+    --error-bg: #3a1422;
+    --warning: #fd971f;
+    --warning-bg: #3a2814;
+    --info: #66d9ef;
+    --info-bg: #1a2c2e;
+    --success: #a6e22e;
+    --success-bg: #1f2c14;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -194,41 +287,134 @@
     overflow-y: auto;
     padding: 4px 0;
   }
-  .file-item {
-    padding: 10px 16px;
-    cursor: pointer;
-    border-left: 2px solid transparent;
+
+  /* ====== File filter (au-dessus de l'arbre) ====== */
+  .file-filter {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: 4px;
-    transition: background 0.1s;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
   }
-  .file-item:hover { background: var(--bg-hover); }
-  .file-item.active {
-    background: var(--bg-3);
-    border-left-color: var(--accent);
-  }
-  .file-name {
+
+  /* ====== Tree view ====== */
+  .tree-folder, .tree-file {
     font-family: var(--mono);
     font-size: 12px;
-    color: var(--text);
-    word-break: break-all;
+    user-select: none;
   }
-  .file-meta {
+
+  .tree-folder-header {
     display: flex;
-    gap: 10px;
-    font-family: var(--mono);
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: background 0.1s;
+  }
+  .tree-folder-header:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+  .tree-chevron {
+    font-size: 10px;
+    width: 10px;
+    color: var(--text-faint);
+    transition: transform 0.15s;
+  }
+  .tree-folder-name {
+    flex: 1;
+    color: var(--text-dim);
+  }
+  .tree-folder-stats {
     font-size: 10px;
     color: var(--text-faint);
+    display: flex;
+    gap: 6px;
   }
-  .file-badge {
-    display: inline-flex;
+  .tree-folder-stats .has-error { color: var(--error); }
+  .tree-folder-stats .has-warning { color: var(--warning); }
+  .tree-folder-stats .has-info { color: var(--info); }
+  .tree-folder-children {
+    margin-left: 0;  /* indentation gérée via padding-left dynamique côté JS */
+  }
+
+  .tree-file {
+    display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
+    padding: 5px 12px 5px 0;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background 0.1s;
   }
-  .file-badge.has-error { color: var(--error); }
-  .file-badge.has-warning { color: var(--warning); }
-  .file-badge.clean { color: var(--success); }
+  .tree-file:hover { background: var(--bg-hover); }
+  .tree-file.active {
+    background: var(--bg-3);
+    border-left-color: var(--accent);
+    color: var(--text);
+  }
+
+  .file-status-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .file-status-dot.errors    { background: var(--error); }
+  .file-status-dot.warnings  { background: var(--warning); }
+  .file-status-dot.info      { background: var(--info); }
+  .file-status-dot.clean     { background: var(--success); }
+  .file-status-dot.corrected {
+    background: transparent;
+    border: 2px solid var(--success);
+    box-sizing: border-box;
+  }
+  .file-status-dot.modified {
+    background: var(--accent);
+  }
+
+  .tree-file-name {
+    flex: 1;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tree-file.muted .tree-file-name { color: var(--text-faint); }
+  .tree-file-count {
+    font-size: 10px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .tree-file-count.has-error   { color: var(--error); }
+  .tree-file-count.has-warning { color: var(--warning); }
+  .tree-file-count.has-info    { color: var(--info); }
+
+  .tree-empty {
+    padding: 24px 16px;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* ====== Theme picker (dans le header) ====== */
+  .theme-picker {
+    background: var(--bg-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .theme-picker:hover { border-color: var(--accent); }
+  .theme-picker:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
 
   .sidebar-actions {
     padding: 12px 16px;
@@ -834,6 +1020,13 @@
       <span class="stat warning"><span class="stat-dot"></span>Avertissements <span class="stat-num" id="statWarn">0</span></span>
       <span class="stat info"><span class="stat-dot"></span>Infos <span class="stat-num" id="statInfo">0</span></span>
       <span class="stat success"><span class="stat-dot"></span>Corrigés <span class="stat-num" id="statFixed">0</span></span>
+      <select class="theme-picker" id="themePicker" onchange="applyTheme(this.value)" title="Theme">
+        <option value="default">Aspx Dark</option>
+        <option value="vsdark">VS Code Dark</option>
+        <option value="monokai">Monokai</option>
+        <option value="solarized">Solarized Dark</option>
+        <option value="light">Light</option>
+      </select>
     </div>
   </header>
 
@@ -851,6 +1044,14 @@
         <div class="upload-zone-sub">.aspx · .ascx · .master</div>
         <input type="file" id="fileInput" multiple accept=".aspx,.ascx,.master,.asax,.cs" style="display:none" />
       </label>
+      <div class="file-filter">
+        <button class="filter-pill active" data-file-filter="all" onclick="setFileFilter('all')">Tous</button>
+        <button class="filter-pill" data-file-filter="errors" onclick="setFileFilter('errors')">Erreurs</button>
+        <button class="filter-pill" data-file-filter="issues" onclick="setFileFilter('issues')">Avec issues</button>
+        <button class="filter-pill" data-file-filter="clean" onclick="setFileFilter('clean')">Propres</button>
+        <button class="filter-pill" data-file-filter="corrected" onclick="setFileFilter('corrected')">Corrigés</button>
+        <button class="filter-pill" data-file-filter="modified" onclick="setFileFilter('modified')">Modifiés</button>
+      </div>
       <div class="file-list" id="fileList"></div>
       <div class="sidebar-actions">
         <button class="btn small" id="btnScanServer" onclick="scanServerFolder()">Scanner un dossier</button>
@@ -999,14 +1200,130 @@ async function loadRulesFromServer() {
    ÉTAT GLOBAL
    ============================================================ */
 const state = {
-  files: [],         // { id, name, ext, original, current, issues, history, hasRun }
+  files: [],            // { id, name, ext, original, current, issues, history, hasRun }
   currentFileId: null,
-  filter: 'all',
-  viewMode: 'code',  // 'code' ou 'diff'
-  fixedCount: 0
+  filter: 'all',        // filtre des issues dans le panneau de droite
+  fileFilter: 'all',    // filtre des fichiers dans la sidebar (all|errors|issues|clean|corrected|modified)
+  viewMode: 'code',     // 'code' ou 'diff'
+  fixedCount: 0,
+  expandedFolders: new Set(),  // chemins de dossiers ouverts dans l'arbre
+  theme: 'default'
 };
 
 let fileIdSeq = 1;
+
+/* ============================================================
+   THEME PICKER — persisté dans localStorage
+   ============================================================ */
+function applyTheme(name) {
+  state.theme = name;
+  document.documentElement.dataset.theme = name;
+  try { localStorage.setItem('aspxlint.theme', name); } catch (e) { /* private mode */ }
+  const picker = $('themePicker');
+  if (picker) picker.value = name;
+}
+function loadThemeFromStorage() {
+  let saved = 'default';
+  try { saved = localStorage.getItem('aspxlint.theme') || 'default'; } catch (e) { }
+  applyTheme(saved);
+}
+
+/* ============================================================
+   ÉTAT D'UN FICHIER (utilisé par l'arbre + le filtre)
+   ============================================================
+   - 'errors'    : il reste au moins 1 issue de severité error
+   - 'warnings'  : il reste des warnings (mais pas d'errors)
+   - 'info'      : il reste des infos seulement
+   - 'modified'  : pas d'issues mais le contenu a changé (in-flight)
+   - 'corrected' : 0 issue, history.length > 0 (a été corrigé)
+   - 'clean'     : 0 issue, 0 history (jamais eu de problème)
+   ============================================================ */
+function computeFileStatus(file) {
+  const issues = (file.issues || []).filter(i => !i.fixed);
+  const errors = issues.filter(i => i.severity === 'error').length;
+  const warnings = issues.filter(i => i.severity === 'warning').length;
+  const infos = issues.filter(i => i.severity === 'info').length;
+  if (errors > 0) return 'errors';
+  if (warnings > 0) return 'warnings';
+  if (infos > 0) return 'info';
+  if (file.current !== file.original) return 'modified';
+  if ((file.history || []).length > 0) return 'corrected';
+  return 'clean';
+}
+
+function fileMatchesFilter(file, f) {
+  if (f === 'all') return true;
+  const status = computeFileStatus(file);
+  if (f === 'errors')    return status === 'errors';
+  if (f === 'issues')    return status === 'errors' || status === 'warnings' || status === 'info';
+  if (f === 'clean')     return status === 'clean';
+  if (f === 'corrected') return status === 'corrected';
+  if (f === 'modified')  return status === 'modified';
+  return true;
+}
+
+function setFileFilter(f) {
+  state.fileFilter = f;
+  document.querySelectorAll('.file-filter .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.fileFilter === f));
+  renderFileList();
+}
+
+/* ============================================================
+   TREE BUILDER — group files by folder, based on file.name which
+   contient le relativePath quand le fichier vient d'un /api/scan.
+   Les fichiers sans separateur ('/') vont a la racine.
+   ============================================================ */
+function buildFileTree(files) {
+  const root = {
+    type: 'folder', name: '', path: '',
+    folders: new Map(), files: []
+  };
+  for (const f of files) {
+    if (!fileMatchesFilter(f, state.fileFilter)) continue;
+    const parts = (f.name || '').split(/[\\/]/);
+    if (parts.length === 1) { root.files.push(f); continue; }
+    let cur = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i];
+      if (!cur.folders.has(seg)) {
+        cur.folders.set(seg, {
+          type: 'folder',
+          name: seg,
+          path: cur.path ? cur.path + '/' + seg : seg,
+          folders: new Map(),
+          files: []
+        });
+      }
+      cur = cur.folders.get(seg);
+    }
+    cur.files.push({ ...f, _displayName: parts[parts.length - 1] });
+  }
+  return root;
+}
+
+function aggregateFolderStats(node) {
+  let errors = 0, warnings = 0, infos = 0, fileCount = 0;
+  for (const f of node.files) {
+    const issues = (f.issues || []).filter(i => !i.fixed);
+    errors += issues.filter(i => i.severity === 'error').length;
+    warnings += issues.filter(i => i.severity === 'warning').length;
+    infos += issues.filter(i => i.severity === 'info').length;
+    fileCount++;
+  }
+  for (const child of node.folders.values()) {
+    const s = aggregateFolderStats(child);
+    errors += s.errors; warnings += s.warnings; infos += s.infos;
+    fileCount += s.fileCount;
+  }
+  return { errors, warnings, infos, fileCount };
+}
+
+function toggleFolder(path) {
+  if (state.expandedFolders.has(path)) state.expandedFolders.delete(path);
+  else state.expandedFolders.add(path);
+  renderFileList();
+}
 
 /* ============================================================
    ANALYSE
@@ -1291,29 +1608,102 @@ function highlightTag(tag) {
 function renderFileList() {
   const list = $('fileList');
   list.innerHTML = '';
-  state.files.forEach(f => {
-    const errors = f.issues.filter(i => i.severity === 'error' && !i.fixed).length;
-    const warnings = f.issues.filter(i => i.severity === 'warning' && !i.fixed).length;
-    const total = f.issues.filter(i => !i.fixed).length;
-    let badgeClass = 'clean';
-    let badgeText = '✓ OK';
-    if (errors > 0) { badgeClass = 'has-error'; badgeText = `● ${errors}E`; }
-    else if (warnings > 0) { badgeClass = 'has-warning'; badgeText = `● ${warnings}W`; }
-    else if (total > 0) { badgeClass = 'has-warning'; badgeText = `● ${total}I`; }
-    const div = document.createElement('div');
-    div.className = 'file-item' + (state.currentFileId === f.id ? ' active' : '');
-    div.onclick = () => selectFile(f.id);
-    div.innerHTML = `
-      <div class="file-name">${escapeHtml(f.name)}</div>
-      <div class="file-meta">
-        <span>${f.ext.toUpperCase()}</span>
-        <span>${f.current.split(/\r?\n/).length} L</span>
-        <span class="file-badge ${badgeClass}">${badgeText}</span>
-      </div>
-    `;
-    list.appendChild(div);
-  });
   $('fileCount').textContent = `${state.files.length} fichier${state.files.length > 1 ? 's' : ''}`;
+
+  if (state.files.length === 0) {
+    list.innerHTML = '<div class="tree-empty">Aucun fichier chargé.<br/>Utilise les boutons ci-dessous.</div>';
+    return;
+  }
+
+  const tree = buildFileTree(state.files);
+  const matchingTotal = aggregateFolderStats(tree).fileCount;
+  if (matchingTotal === 0) {
+    list.innerHTML = `<div class="tree-empty">Aucun fichier ne correspond au filtre <b>${state.fileFilter}</b>.</div>`;
+    return;
+  }
+
+  // Ouvre par défaut tous les dossiers de premier niveau si state.expandedFolders vide.
+  if (state.expandedFolders.size === 0) {
+    for (const folder of tree.folders.values()) state.expandedFolders.add(folder.path);
+  }
+
+  list.appendChild(renderTreeNode(tree, 0));
+}
+
+function renderTreeNode(node, depth) {
+  const wrap = document.createElement('div');
+
+  // Sous-dossiers (triés alpha)
+  const folders = Array.from(node.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
+  for (const folder of folders) {
+    const stats = aggregateFolderStats(folder);
+    if (stats.fileCount === 0) continue;     // tout filtré dedans
+
+    const expanded = state.expandedFolders.has(folder.path);
+
+    const folderDiv = document.createElement('div');
+    folderDiv.className = 'tree-folder';
+    folderDiv.dataset.path = folder.path;
+
+    const header = document.createElement('div');
+    header.className = 'tree-folder-header';
+    header.style.paddingLeft = (8 + depth * 14) + 'px';
+    header.onclick = () => toggleFolder(folder.path);
+
+    const statsHtml = [];
+    if (stats.errors > 0)   statsHtml.push(`<span class="has-error">●${stats.errors}</span>`);
+    if (stats.warnings > 0) statsHtml.push(`<span class="has-warning">●${stats.warnings}</span>`);
+    if (stats.infos > 0)    statsHtml.push(`<span class="has-info">●${stats.infos}</span>`);
+    statsHtml.push(`<span>${stats.fileCount} ƒ</span>`);
+
+    header.innerHTML = `
+      <span class="tree-chevron">${expanded ? '▼' : '▶'}</span>
+      <span class="tree-folder-name">${escapeHtml(folder.name)}</span>
+      <span class="tree-folder-stats">${statsHtml.join('')}</span>
+    `;
+    folderDiv.appendChild(header);
+
+    if (expanded) {
+      const children = document.createElement('div');
+      children.className = 'tree-folder-children';
+      children.appendChild(renderTreeNode(folder, depth + 1));
+      folderDiv.appendChild(children);
+    }
+    wrap.appendChild(folderDiv);
+  }
+
+  // Fichiers (triés alpha)
+  const files = node.files.slice().sort((a, b) =>
+    (a._displayName || a.name).localeCompare(b._displayName || b.name));
+  for (const f of files) {
+    const status = computeFileStatus(f);
+    const remaining = (f.issues || []).filter(i => !i.fixed).length;
+    const errors = (f.issues || []).filter(i => i.severity === 'error' && !i.fixed).length;
+    const warnings = (f.issues || []).filter(i => i.severity === 'warning' && !i.fixed).length;
+
+    const fileDiv = document.createElement('div');
+    fileDiv.className = 'tree-file' + (state.currentFileId === f.id ? ' active' : '')
+                      + (status === 'clean' || status === 'corrected' ? ' muted' : '');
+    fileDiv.dataset.status = status;
+    fileDiv.style.paddingLeft = (8 + depth * 14) + 'px';
+    fileDiv.onclick = () => selectFile(f.id);
+
+    let countHtml = '';
+    if (errors > 0)        countHtml = `<span class="tree-file-count has-error">${errors}</span>`;
+    else if (warnings > 0) countHtml = `<span class="tree-file-count has-warning">${warnings}</span>`;
+    else if (remaining > 0) countHtml = `<span class="tree-file-count has-info">${remaining}</span>`;
+    else if (status === 'corrected') countHtml = `<span class="tree-file-count" title="Corrigé">✓</span>`;
+    else if (status === 'modified')  countHtml = `<span class="tree-file-count" title="Modifié">●</span>`;
+
+    fileDiv.innerHTML = `
+      <span class="file-status-dot ${status}" title="${status}"></span>
+      <span class="tree-file-name">${escapeHtml(f._displayName || f.name)}</span>
+      ${countHtml}
+    `;
+    wrap.appendChild(fileDiv);
+  }
+
+  return wrap;
 }
 
 function renderCode() {
@@ -2038,6 +2428,7 @@ initDragDrop();
 // La dashboard tourne toujours derriere AspxLint.Server (file:// bloque tout
 // au debut du script).
 (async () => {
+  loadThemeFromStorage();
   await loadRulesFromServer();
   renderAll();
 })();
