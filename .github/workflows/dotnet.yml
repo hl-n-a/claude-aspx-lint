@@ -41,10 +41,15 @@ jobs:
         run: pwsh tests/AspxLint.E2E.Tests/bin/Release/net9.0/playwright.ps1 install chromium
 
       - name: Run all tests with coverage
+        # Les tests Desktop FlaUI sont skip en CI : le runner Windows-hosted
+        # n'a pas de session interactive WPF utilisable, le QrWindow ne
+        # s'affiche pas, et FlaUI.Application.Attach echoue.
+        # Ils restent runables localement (sur poste avec session GUI).
         run: >
           dotnet test aspx_lint.sln
           --no-build
           --configuration Release
+          --filter "Category!=RequiresDesktop"
           --collect:"XPlat Code Coverage"
           --settings coverlet.runsettings
           --results-directory coverage/raw
@@ -104,8 +109,18 @@ jobs:
       # et on uploade le rapport dans GitHub Code Scanning.
       # ---------------------------------------------------------------
       - name: Self-scan with aspx-lint
+        # `scan` retourne exit 1 quand des issues sont trouvees (par design).
+        # On veut produire le SARIF pour Code Scanning sans faire echouer la CI :
+        # `|| true` neutralise l'exit code, le SARIF est ecrit quand meme.
         if: always()
-        run: dotnet run --project src/AspxLint.Cli --no-build --configuration Release -- scan tests/fixtures --sarif > aspx-lint.sarif
+        shell: pwsh
+        run: |
+          dotnet run --project src/AspxLint.Cli --no-build --configuration Release -- scan tests/fixtures --sarif > aspx-lint.sarif
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+            Write-Host "::error::aspx-lint scan returned unexpected exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          exit 0
 
       - name: Upload SARIF to Code Scanning
         if: always()

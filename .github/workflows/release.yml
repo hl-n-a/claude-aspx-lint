@@ -108,11 +108,21 @@ jobs:
       # ---------------------------------------------------------------
       # Push vers NuGet.org
       # `--skip-duplicate` evite l'erreur si le tag est rebuild apres coup.
+      # On skip cleanly si le secret n'est pas configure (1ere release sans
+      # avoir encore pose la cle NuGet) au lieu de jeter une erreur de parsing.
       # ---------------------------------------------------------------
       - name: Push to NuGet.org
-        if: github.event_name == 'push'   # uniquement sur tag, pas sur workflow_dispatch
-        run: >
-          dotnet nuget push nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg
-          --api-key ${{ secrets.NUGET_API_KEY }}
-          --source https://api.nuget.org/v3/index.json
-          --skip-duplicate
+        if: github.event_name == 'push'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_PACKAGE: nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg
+        shell: bash
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::warning::NUGET_API_KEY non defini — skip du push NuGet. La GitHub Release est tout de meme creee."
+            exit 0
+          fi
+          dotnet nuget push "$NUGET_PACKAGE" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
