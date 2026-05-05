@@ -2164,7 +2164,9 @@ async function restoreCurrentFromServer() {
     file.original = data.content;
     file.current = data.content;
     file.history = [];
-    runAnalysis(file);
+    // BUG fix : sans `await`, renderAll() s'execute avant que les issues
+    // soient retournees, donc le tree est rendu avec les anciens counters.
+    await runAnalysis(file);
     showToast(`Restauré depuis .bak (${data.bytes} octets).`, 'success');
     renderAll();
   } catch (e) {
@@ -2196,6 +2198,10 @@ async function saveCurrentToServer() {
     }
     const data = await r.json();
     file.original = file.current; // disque et mémoire sont desormais alignés
+    // Re-analyse pour garantir que les counters de la sidebar sont en sync
+    // avec le contenu reel du fichier (couvre le cas ou le disque aurait
+    // ete modifie entre temps + sert de filet de securite).
+    await runAnalysis(file);
     const note = data.backedUp ? ' (backup .bak créé)' : '';
     showToast(`Enregistré sur le serveur : ${data.bytes} octets${note}.`, 'success');
     renderAll();
