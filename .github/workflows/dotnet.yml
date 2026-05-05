@@ -10,6 +10,14 @@ on:
 permissions:
   contents: read
 
+# Force toutes les actions JS embarquees a tourner sur Node.js 24,
+# meme celles qui declarent encore Node 20 dans leur action.yml.
+# Permet d'ignorer les major bumps (v5/v6/v7/...) en attendant qu'ils
+# soient stables sans subir le deprecation warning a chaque run.
+# Date butoir GitHub : Node 20 retire le 16 sept 2026.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-and-test:
     runs-on: windows-latest

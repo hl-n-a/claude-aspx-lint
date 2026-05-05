@@ -18,6 +18,12 @@ updates:
       - "nuget"
     commit-message:
       prefix: "deps(nuget)"
+    # Major bumps trop souvent breaking (coverlet 6→10, xunit 2→3,
+    # microsoft-aspnetcore 9→10, etc.) — on les ignore et on les fera
+    # manuellement quand on aura le temps de tester.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       patch-updates:
         applies-to: version-updates
@@ -47,6 +53,12 @@ updates:
       - "ci"
     commit-message:
       prefix: "deps(actions)"
+    # Idem : on ignore les major bumps (upload-artifact 4→7, setup-dotnet
+    # 4→5, etc.) qui sont quasi systematiquement breaking. On les bumpera
+    # manuellement quand on migrera vers Node 24 (deadline juin 2026).
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       all-actions:
         patterns:
