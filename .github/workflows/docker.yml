@@ -91,19 +91,30 @@ jobs:
         if: github.event_name != 'push' || github.ref != 'refs/tags/v*'
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
-          docker run --rm -d --name aspx-lint-smoke \
+          # Pas de --rm : on veut pouvoir lire les logs si le container crashe.
+          docker run -d --name aspx-lint-smoke \
             -p 5174:5173 \
             -e ASPXLINT_API_KEY=smoke-test \
             "$IMAGE_TAG"
-          # Attente que le serveur réponde
+
+          ok=0
           for i in {1..30}; do
             if curl -fsS http://localhost:5174/healthz; then
               echo ""
-              docker stop aspx-lint-smoke
-              exit 0
+              ok=1
+              break
             fi
             sleep 1
           done
-          docker logs aspx-lint-smoke
-          docker stop aspx-lint-smoke
-          exit 1
+
+          # Toujours afficher les logs (utile meme si OK pour valider la sortie console)
+          echo "===== container logs ====="
+          docker logs aspx-lint-smoke 2>&1 || true
+          docker rm -f aspx-lint-smoke > /dev/null 2>&1 || true
+
+          if [ "$ok" = "1" ]; then
+            echo "smoke test OK"
+          else
+            echo "smoke test FAILED"
+            exit 1
+          fi

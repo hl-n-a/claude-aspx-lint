@@ -52,9 +52,14 @@ RUN dotnet publish src/AspxLint.Server/AspxLint.Server.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 
-# Utilisateur non-root pour matcher les bonnes pratiques.
+# Utilisateur non-root pour matcher les bonnes pratiques. On lui prepare
+# explicitement /app/data pour que .NET y cree son dossier de logs (sinon
+# Environment.GetFolderPath(LocalApplicationData) tente $HOME/.local/share
+# et l'user system n'a pas de home accessible en ecriture).
 RUN groupadd --system --gid 1000 aspxlint \
- && useradd --system --uid 1000 --gid aspxlint --shell /bin/false aspxlint
+ && useradd --system --uid 1000 --gid aspxlint --shell /bin/false aspxlint \
+ && mkdir -p /app/data \
+ && chown -R aspxlint:aspxlint /app
 
 COPY --from=build --chown=aspxlint:aspxlint /app .
 
@@ -63,7 +68,8 @@ USER aspxlint
 EXPOSE 5173
 ENV ASPNETCORE_URLS=http://0.0.0.0:5173 \
     DOTNET_RUNNING_IN_CONTAINER=true \
-    DOTNET_USE_POLLING_FILE_WATCHER=false
+    DOTNET_USE_POLLING_FILE_WATCHER=false \
+    XDG_DATA_HOME=/app/data
 
 ENTRYPOINT ["dotnet", "AspxLint.Server.dll"]
 CMD ["--port", "5173"]
