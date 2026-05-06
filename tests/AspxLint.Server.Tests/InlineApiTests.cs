@@ -94,6 +94,61 @@ public class InlineApiTests : IClassFixture<ApiFixture>
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
+    // ========== /api/fix-one ==========
+
+    [Fact]
+    public async Task FixOne_applies_only_to_target_line()
+    {
+        var client = _fx.CreateAuthClient();
+        // 3 occurrences de TAG-001 (<br>) sur 3 lignes differentes.
+        var content = "<br>\n<br>\n<br>\n";
+        var r = await client.PostAsJsonAsync("/api/fix-one",
+            new { content, ext = "aspx", ruleId = "TAG-001", line = 2 });
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var fixedContent = body.GetProperty("content").GetString()!;
+        Assert.Equal(1, body.GetProperty("applied").GetInt32());
+        Assert.Equal("line-local", body.GetProperty("strategy").GetString());
+        // Ligne 2 fixe, lignes 1 et 3 inchangees.
+        var lines = fixedContent.Split('\n');
+        Assert.Equal("<br>", lines[0]);
+        Assert.Equal("<br />", lines[1]);
+        Assert.Equal("<br>", lines[2]);
+    }
+
+    [Fact]
+    public async Task FixOne_invalid_line_returns_400()
+    {
+        var client = _fx.CreateAuthClient();
+        var r = await client.PostAsJsonAsync("/api/fix-one",
+            new { content = "<br>\n", ext = "aspx", ruleId = "TAG-001", line = 99 });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task FixOne_returns_strategy_field()
+    {
+        var client = _fx.CreateAuthClient();
+        // Verifie simplement que l'endpoint renvoie le champ "strategy" requis
+        // par le frontend (line-local ou file-level).
+        var r = await client.PostAsJsonAsync("/api/fix-one",
+            new { content = "<br>\n", ext = "aspx", ruleId = "TAG-001", line = 1 });
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var strategy = body.GetProperty("strategy").GetString();
+        Assert.Contains(strategy, new[] { "line-local", "file-level" });
+    }
+
+    [Fact]
+    public async Task FixOne_unknown_rule_returns_404()
+    {
+        var client = _fx.CreateAuthClient();
+        var r = await client.PostAsJsonAsync("/api/fix-one",
+            new { content = "x", ext = "aspx", ruleId = "DOES-NOT-EXIST", line = 1 });
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
     [Fact]
     public async Task Fix_clean_content_returns_zero_applied()
     {

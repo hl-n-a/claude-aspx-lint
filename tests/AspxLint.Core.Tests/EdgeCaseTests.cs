@@ -425,6 +425,147 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void CustomRule_basic_pattern_match()
+    {
+        var rule = new AspxLint.Core.Rules.CustomRule(
+            "CUSTOM-TEST", "Pas de TODO",
+            Severity.Warning, "...", @"TODO[: ]", "Resoudre.");
+        var content = "<%-- TODO: x --%>\n<p>nothing</p>\nTODO new\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        // Le commentaire ASP est masque par defaut, donc seule la 3e ligne fire.
+        var issues = rule.Detect(content, content.Split('\n'), ctx).ToList();
+        Assert.Single(issues);
+        Assert.Equal(3, issues[0].Line);
+    }
+
+    [Fact]
+    public void CustomRule_ignoreCase_works()
+    {
+        var rule = new AspxLint.Core.Rules.CustomRule(
+            "CUSTOM-CASE", "Mots-cles", Severity.Info, "...",
+            @"WIP", "Finir.", ignoreCase: true);
+        var content = "<p>wip</p>\n<p>WIP</p>\n<p>Wip</p>\n";
+        var issues = rule.Detect(content, content.Split('\n'), new RuleContext("aspx", "x.aspx")).ToList();
+        Assert.Equal(3, issues.Count);
+    }
+
+    [Fact]
+    public void CustomRule_maskAspBlocks_false_scans_inside_blocks()
+    {
+        var rule = new AspxLint.Core.Rules.CustomRule(
+            "CUSTOM-NOMASK", "Magic numbers", Severity.Info, "...",
+            @"\b9999\b", "Constante.", maskAspBlocks: false);
+        var content = "<%= 9999 %>\n";
+        var issues = rule.Detect(content, content.Split('\n'), new RuleContext("aspx", "x.aspx")).ToList();
+        Assert.Single(issues);
+    }
+
+    [Fact]
+    public void Config_resolveRules_appends_custom_after_builtin()
+    {
+        var config = new AspxLintConfig
+        {
+            CustomRules =
+            {
+                new CustomRuleDefinition { Id = "CUSTOM-X", Pattern = "X", Severity = "info" },
+                new CustomRuleDefinition { Id = "CUSTOM-Y", Pattern = "Y", Severity = "error" }
+            }
+        };
+        var result = config.ResolveRules(RuleRegistry.All).ToList();
+        Assert.Equal(RuleRegistry.All.Count + 2, result.Count);
+        Assert.Equal("CUSTOM-X", result[^2].Id);
+        Assert.Equal("CUSTOM-Y", result[^1].Id);
+    }
+
+    [Fact]
+    public void Translations_returns_french_for_default_locale()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "TAG-001");
+        var (name, desc) = Translations.Resolve(rule, null);
+        Assert.Equal(rule.Name, name);
+        Assert.Equal(rule.Description, desc);
+    }
+
+    [Fact]
+    public void Translations_returns_english_for_en_locale()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "TAG-001");
+        var (name, _) = Translations.Resolve(rule, "en");
+        Assert.NotEqual(rule.Name, name);
+        Assert.Contains("XHTML", name);
+    }
+
+    [Fact]
+    public void Translations_falls_back_to_source_for_unknown_locale()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "WS-001");
+        var (name, _) = Translations.Resolve(rule, "es");
+        Assert.Equal(rule.Name, name);
+    }
+
+    [Fact]
+    public void Translations_covers_all_29_rules_in_english()
+    {
+        // Garde-fou : si on ajoute une regle, on doit ajouter sa traduction EN
+        // sinon les utilisateurs --lang en voient un mix FR/EN.
+        var missing = RuleRegistry.All
+            .Where(r => Translations.Resolve(r, "en").Name == r.Name)
+            .Select(r => r.Id)
+            .ToList();
+        Assert.True(missing.Count == 0,
+            "Traductions EN manquantes pour : " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void ScanIncremental_returns_cached_result_when_hash_unchanged()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile("a.ascx", "<p>x</p>\n");
+        var cache = new ProjectScanner.IncrementalCache();
+
+        var (run1, n1) = ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        Assert.Equal(1, n1);   // 1 fichier re-analyse
+        Assert.Single(run1);
+
+        var (run2, n2) = ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        Assert.Equal(0, n2);   // hash inchange -> 0 re-analyses
+        Assert.Single(run2);
+        Assert.Same(run1[0], run2[0]);   // meme reference, recuperee du cache
+    }
+
+    [Fact]
+    public void ScanIncremental_reanalyzes_after_file_change()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile("a.ascx", "<p>x</p>\n");
+        var cache = new ProjectScanner.IncrementalCache();
+
+        ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        // Modifie le fichier
+        tmp.WriteFile("a.ascx", "<p>y</p>\n");
+        var (run2, n2) = ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        Assert.Equal(1, n2);
+    }
+
+    [Fact]
+    public void ScanIncremental_drops_cache_for_deleted_files()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile("a.ascx", "<p>x</p>\n");
+        tmp.WriteFile("b.ascx", "<p>y</p>\n");
+        var cache = new ProjectScanner.IncrementalCache();
+
+        var (run1, _) = ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        Assert.Equal(2, run1.Count);
+        Assert.Equal(2, cache.Count);
+
+        File.Delete(Path.Combine(tmp.Path, "b.ascx"));
+        var (run2, _) = ProjectScanner.ScanIncremental(tmp.Path, RuleRegistry.All, cache);
+        Assert.Single(run2);
+        Assert.Equal(1, cache.Count);
+    }
+
+    [Fact]
     public void IssueFilter_disable_line_ignores_next_line()
     {
         var content =

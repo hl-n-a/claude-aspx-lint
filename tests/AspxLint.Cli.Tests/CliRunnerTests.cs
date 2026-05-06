@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Xml.Linq;
+
 namespace AspxLint.Cli.Tests;
 
 public class CliRunnerTests
@@ -8,6 +11,212 @@ public class CliRunnerTests
         var e = new StringWriter();
         var code = CliRunner.RunAsync(args, o, e).GetAwaiter().GetResult();
         return (code, o.ToString(), e.ToString());
+    }
+
+    /// <summary>
+    /// Cree un fichier ASPX avec quelques issues pour tester les formatters.
+    /// </summary>
+    private static TempDir MakeFixture()
+    {
+        var tmp = new TempDir();
+        tmp.WriteFile("page.aspx",
+            "<%@ Page Language=\"C#\" %>\n" +
+            "<html><head><title>x</title></head>\n" +
+            "<body><img src=\"a.png\"></body>\n" +
+            "</html>\n");
+        return tmp;
+    }
+
+    [Fact]
+    public void Scan_junit_format_writes_valid_xml()
+    {
+        using var tmp = MakeFixture();
+        var (code, stdout, _) = Run("scan", tmp.Path, "--junit");
+        Assert.True(code == CliRunner.ExitOk || code == CliRunner.ExitIssuesFound);
+        var doc = XDocument.Parse(stdout);
+        Assert.Equal("testsuites", doc.Root!.Name.LocalName);
+        Assert.NotNull(doc.Root.Attribute("name"));
+        Assert.NotNull(doc.Root.Attribute("tests"));
+        // Au moins un testsuite si des issues ont ete trouvees.
+        var suites = doc.Root.Elements("testsuite").ToList();
+        Assert.NotEmpty(suites);
+    }
+
+    [Fact]
+    public void Scan_codeclimate_format_emits_valid_json_array()
+    {
+        using var tmp = MakeFixture();
+        var (_, stdout, _) = Run("scan", tmp.Path, "--codeclimate");
+        var doc = JsonDocument.Parse(stdout);
+        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
+        Assert.True(doc.RootElement.GetArrayLength() > 0);
+        var first = doc.RootElement[0];
+        Assert.Equal("issue", first.GetProperty("type").GetString());
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("check_name").GetString()));
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("fingerprint").GetString()));
+        // 4 categories autorisees par CodeClimate
+        var cat = first.GetProperty("categories")[0].GetString();
+        Assert.Contains(cat, new[] { "Style", "Bug Risk", "Security", "Compatibility", "Complexity", "Clarity", "Performance" });
+    }
+
+    [Fact]
+    public void Scan_tap_format_starts_with_version_and_plan()
+    {
+        using var tmp = MakeFixture();
+        var (_, stdout, _) = Run("scan", tmp.Path, "--tap");
+        var lines = stdout.Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
+        Assert.Equal("TAP version 14", lines[0]);
+        Assert.Matches(@"^1\.\.\d+$", lines[1]);
+    }
+
+    [Fact]
+    public void Scan_quiet_only_prints_summary_line()
+    {
+        using var tmp = MakeFixture();
+        var (_, stdout, _) = Run("scan", tmp.Path, "--quiet");
+        var trimmed = stdout.Trim();
+        // Une seule ligne, pas de details par fichier.
+        var lines = trimmed.Split('\n');
+        Assert.Single(lines);
+        Assert.Contains("fichier(s) scannes", trimmed);
+    }
+
+    [Fact]
+    public void Scan_lang_en_translates_rule_names_in_json()
+    {
+        using var tmp = MakeFixture();
+        var (_, stdout, _) = Run("scan", tmp.Path, "--json", "--lang", "en");
+        var doc = JsonDocument.Parse(stdout);
+        var issues = doc.RootElement.GetProperty("files");
+        var found = false;
+        foreach (var f in issues.EnumerateArray())
+        {
+            foreach (var i in f.GetProperty("issues").EnumerateArray())
+            {
+                if (i.GetProperty("ruleName").GetString()?.Contains(" sans ") == false &&
+                    i.GetProperty("ruleId").GetString() != null)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) break;
+        }
+        Assert.True(found, "Aucune issue avec un nom de regle non-francais detecte.");
+    }
+
+    [Fact]
+    public void Scan_lang_invalid_returns_error()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("scan", tmp.Path, "--lang", "klingon");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--lang", stderr);
+    }
+
+    [Fact]
+    public void Init_creates_aspxlintrc_template()
+    {
+        using var tmp = new TempDir();
+        var prev = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(tmp.Path);
+            var (code, stdout, _) = Run("init");
+            Assert.Equal(CliRunner.ExitOk, code);
+            var configPath = Path.Combine(tmp.Path, ".aspxlintrc.json");
+            Assert.True(File.Exists(configPath));
+            var content = File.ReadAllText(configPath);
+            Assert.Contains("\"ignore\":", content);
+            Assert.Contains("\"rules\":", content);
+            // Toutes les regles built-in doivent figurer dans le template.
+            Assert.Contains("\"DIR-001\"", content);
+            Assert.Contains("\"WS-006\"", content);
+        }
+        finally { Directory.SetCurrentDirectory(prev); }
+    }
+
+    [Fact]
+    public void Init_refuses_overwrite_without_force()
+    {
+        using var tmp = new TempDir();
+        var prev = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(tmp.Path);
+            File.WriteAllText(Path.Combine(tmp.Path, ".aspxlintrc.json"), "{}");
+            var (code, _, stderr) = Run("init");
+            Assert.Equal(CliRunner.ExitIssuesFound, code);
+            Assert.Contains("--force", stderr);
+        }
+        finally { Directory.SetCurrentDirectory(prev); }
+    }
+
+    [Fact]
+    public void Init_force_overwrites()
+    {
+        using var tmp = new TempDir();
+        var prev = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(tmp.Path);
+            var configPath = Path.Combine(tmp.Path, ".aspxlintrc.json");
+            File.WriteAllText(configPath, "{}");
+            var (code, _, _) = Run("init", "--force");
+            Assert.Equal(CliRunner.ExitOk, code);
+            var content = File.ReadAllText(configPath);
+            Assert.Contains("\"ignore\":", content);   // template applique
+        }
+        finally { Directory.SetCurrentDirectory(prev); }
+    }
+
+    [Fact]
+    public void Benchmark_runs_and_prints_per_rule_breakdown()
+    {
+        using var tmp = MakeFixture();
+        var (code, stdout, _) = Run("benchmark", tmp.Path, "--runs", "1");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("Warmup", stdout);
+        Assert.Contains("Per-rule", stdout);
+        Assert.Contains("Total per-rule sum", stdout);
+    }
+
+    [Fact]
+    public void Benchmark_missing_path_returns_error()
+    {
+        var (code, _, stderr) = Run("benchmark");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Custom_rules_loaded_from_aspxlintrc_match()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile(".aspxlintrc.json", @"
+        {
+            ""customRules"": [
+                {
+                    ""id"": ""CUSTOM-TODO"",
+                    ""name"": ""TODO"",
+                    ""severity"": ""warning"",
+                    ""description"": ""..."",
+                    ""pattern"": ""TODO[: ]"",
+                    ""hint"": ""Resoudre."",
+                    ""maskAspBlocks"": false
+                }
+            ]
+        }");
+        tmp.WriteFile("page.aspx", "<p>TODO: refactor</p>\n");
+        var (_, stdout, _) = Run("scan", tmp.Path, "--json");
+        var doc = JsonDocument.Parse(stdout);
+        var found = false;
+        foreach (var f in doc.RootElement.GetProperty("files").EnumerateArray())
+        foreach (var i in f.GetProperty("issues").EnumerateArray())
+        {
+            if (i.GetProperty("ruleId").GetString() == "CUSTOM-TODO") { found = true; break; }
+        }
+        Assert.True(found, "La custom rule CUSTOM-TODO devrait avoir matche.");
     }
 
     [Fact]
