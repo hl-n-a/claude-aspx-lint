@@ -25,6 +25,10 @@
       <span class="stat warning"><span class="stat-dot"></span>Avertissements <span class="stat-num" id="statWarn">0</span></span>
       <span class="stat info"><span class="stat-dot"></span>Infos <span class="stat-num" id="statInfo">0</span></span>
       <span class="stat success"><span class="stat-dot"></span>Corrigés <span class="stat-num" id="statFixed">0</span></span>
+      <label class="persist-toggle" title="Sauvegarder l'état entre les rechargements (localStorage du navigateur uniquement, pas envoyé au serveur)">
+        <input type="checkbox" id="persistToggle" onchange="togglePersist(this.checked)" />
+        <span>Persister</span>
+      </label>
       <select class="theme-picker" id="themePicker" onchange="applyTheme(this.value)" title="Theme">
         <option value="default">Aspx Dark</option>
         <option value="vsdark">VS Code Dark</option>
@@ -44,6 +48,10 @@
         <span class="file-count" id="fileCount">0 fichiers</span>
       </div>
       <input type="file" id="fileInput" multiple accept=".aspx,.ascx,.master,.asax,.cs" style="display:none" />
+      <div class="file-search">
+        <input type="text" id="fileSearch" placeholder="🔍  Rechercher (Ctrl+P)" oninput="setFileSearch(this.value)" />
+        <button class="btn ghost small" id="fileSearchClear" onclick="clearFileSearch()" title="Effacer" style="display:none">×</button>
+      </div>
       <div class="file-filter">
         <button class="filter-pill active" data-file-filter="all" onclick="setFileFilter('all')">Tous</button>
         <button class="filter-pill" data-file-filter="errors" onclick="setFileFilter('errors')">Erreurs</button>
@@ -82,6 +90,7 @@
         </div>
         <div class="code-actions">
           <button class="btn small" id="btnDiff" onclick="toggleDiff()" disabled>⇆ Avant / Après</button>
+          <button class="btn small" id="btnSplit" onclick="toggleSplitView()" disabled title="Code + diff côte à côte">◫ Split</button>
           <button class="btn small" id="btnDownload" onclick="downloadCurrent()" disabled>⬇ Télécharger</button>
           <button class="btn small" id="btnSaveServer" onclick="saveCurrentToServer()" disabled>💾 Enregistrer</button>
           <button class="btn small ghost" id="btnRestoreServer" onclick="restoreCurrentFromServer()" disabled>↺ Restaurer .bak</button>
@@ -138,6 +147,10 @@
 {{include:partials/modal-browse.html}}
 
 {{include:partials/modal-rules.html}}
+
+{{include:partials/modal-palette.html}}
+
+{{include:partials/modal-batch-report.html}}
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>

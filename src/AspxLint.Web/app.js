@@ -50,6 +50,8 @@ const state = {
   fixedCount: 0,
   expandedFolders: new Set(),  // chemins de dossiers ouverts dans l'arbre
   selectedFileIds: new Set(),  // multi-selection (pour les actions en lot)
+  fileSearch: '',              // texte du filtre de recherche dans la sidebar
+  splitView: false,            // vue code+diff cote a cote au lieu du toggle
   theme: 'default'
 };
 
@@ -71,6 +73,115 @@ function loadThemeFromStorage() {
   let saved = 'vsdark';
   try { saved = localStorage.getItem('aspxlint.theme') || 'vsdark'; } catch (e) { }
   applyTheme(saved);
+}
+
+/* ============================================================
+   PERSISTANCE LOCALSTORAGE — opt-in via le toggle "Persister"
+   ============================================================
+   On sauvegarde la liste des fichiers (avec original/current/history/
+   serverPath) + le currentFileId. Au reload, si le toggle est coche on
+   propose la restauration. Garde-fou taille : si > 4 MB, on coupe les
+   fichiers les plus gros pour rester sous le quota localStorage (~5MB).
+   ============================================================ */
+
+const PERSIST_KEY = 'aspxlint.session.v1';
+const PERSIST_FLAG_KEY = 'aspxlint.persist';
+const PERSIST_LIMIT_BYTES = 4 * 1024 * 1024;   // 4 MB
+
+let persistEnabled = false;
+let persistDebounce = null;
+
+function isPersistEnabled() {
+  try { return localStorage.getItem(PERSIST_FLAG_KEY) === '1'; } catch { return false; }
+}
+
+function togglePersist(checked) {
+  persistEnabled = checked;
+  try {
+    if (checked) {
+      localStorage.setItem(PERSIST_FLAG_KEY, '1');
+      schedulePersist();
+      showToast('Session sauvegardée localement à chaque modification.', 'success');
+    } else {
+      localStorage.removeItem(PERSIST_FLAG_KEY);
+      localStorage.removeItem(PERSIST_KEY);
+      showToast('Persistance désactivée, état effacé du navigateur.', 'success');
+    }
+  } catch (e) {
+    showToast('localStorage indisponible : ' + e.message, 'error');
+  }
+}
+
+function schedulePersist() {
+  if (!persistEnabled) return;
+  clearTimeout(persistDebounce);
+  persistDebounce = setTimeout(persistNow, 500);
+}
+
+function persistNow() {
+  if (!persistEnabled) return;
+  try {
+    const payload = {
+      version: 1,
+      savedAt: Date.now(),
+      currentFileId: state.currentFileId,
+      fileFilter: state.fileFilter,
+      fileSearch: state.fileSearch,
+      files: state.files.map(f => ({
+        id: f.id, name: f.name, ext: f.ext,
+        original: f.original, current: f.current,
+        history: f.history, serverPath: f.serverPath
+      }))
+    };
+    let json = JSON.stringify(payload);
+    // Garde-fou taille : on coupe les plus gros fichiers d'abord.
+    while (json.length > PERSIST_LIMIT_BYTES && payload.files.length > 0) {
+      payload.files.sort((a, b) => b.current.length - a.current.length);
+      payload.files.shift();
+      json = JSON.stringify(payload);
+    }
+    localStorage.setItem(PERSIST_KEY, json);
+  } catch (e) {
+    // Quota plein, JSON invalide, etc. — silencieux pour ne pas spammer l'UI.
+    console.warn('persist failed:', e);
+  }
+}
+
+async function maybeRestoreFromStorage() {
+  if (!persistEnabled) return false;
+  let payload;
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return false;
+    payload = JSON.parse(raw);
+  } catch { return false; }
+  if (!payload || !payload.files || payload.files.length === 0) return false;
+
+  const ageMin = Math.round((Date.now() - (payload.savedAt || 0)) / 60000);
+  const ageStr = ageMin < 1 ? 'à l\'instant' : ageMin < 60 ? `il y a ${ageMin} min` : `il y a ${Math.round(ageMin / 60)}h`;
+  if (!confirm(`Restaurer la session précédente (${payload.files.length} fichier(s), sauvegardée ${ageStr}) ?`)) {
+    return false;
+  }
+
+  // Restaure les fichiers sans relancer une analyse serveur (les issues
+  // sont recalculees a la demande, ou on en relance une apres restore).
+  state.files = payload.files.map(f => ({
+    id: f.id, name: f.name, ext: f.ext,
+    original: f.original, current: f.current,
+    issues: [],   // sera rempli par runAnalysis
+    history: f.history || [],
+    hasRun: false,
+    serverPath: f.serverPath || null
+  }));
+  fileIdSeq = Math.max(...state.files.map(f => parseInt((f.id || 'f0').slice(1)) || 0)) + 1;
+  state.currentFileId = payload.currentFileId;
+  state.fileFilter = payload.fileFilter || 'all';
+  state.fileSearch = payload.fileSearch || '';
+  if (state.fileSearch) $('fileSearch').value = state.fileSearch;
+
+  showToast(`Restauration de ${state.files.length} fichier(s)…`, 'success');
+  for (const f of state.files) await runAnalysis(f);
+  return true;
 }
 
 /* ============================================================
@@ -97,14 +208,45 @@ function computeFileStatus(file) {
 }
 
 function fileMatchesFilter(file, f) {
-  if (f === 'all') return true;
-  const status = computeFileStatus(file);
-  if (f === 'errors')    return status === 'errors';
-  if (f === 'issues')    return status === 'errors' || status === 'warnings' || status === 'info';
-  if (f === 'clean')     return status === 'clean';
-  if (f === 'corrected') return status === 'corrected';
-  if (f === 'modified')  return status === 'modified';
+  if (f !== 'all') {
+    const status = computeFileStatus(file);
+    if (f === 'errors'    && status !== 'errors')    return false;
+    if (f === 'issues'    && status !== 'errors' && status !== 'warnings' && status !== 'info') return false;
+    if (f === 'clean'     && status !== 'clean')     return false;
+    if (f === 'corrected' && status !== 'corrected') return false;
+    if (f === 'modified'  && status !== 'modified')  return false;
+  }
+  // Recherche par nom (substring case-insensitive sur le path complet).
+  if (state.fileSearch) {
+    const q = state.fileSearch.toLowerCase();
+    if (!(file.name || '').toLowerCase().includes(q)) return false;
+  }
   return true;
+}
+
+function setFileSearch(text) {
+  state.fileSearch = (text || '').trim();
+  $('fileSearchClear').style.display = state.fileSearch ? '' : 'none';
+  // Auto-expand tous les dossiers quand une recherche est active, sinon on
+  // ne voit pas les fichiers profondement enfouis qui matchent.
+  if (state.fileSearch) {
+    for (const f of state.files) {
+      const parts = (f.name || '').split(/[\\/]/);
+      let path = '';
+      for (let i = 0; i < parts.length - 1; i++) {
+        path = path ? path + '/' + parts[i] : parts[i];
+        state.expandedFolders.add(path);
+      }
+    }
+  }
+  renderFileList();
+  renderBulkBar();
+}
+
+function clearFileSearch() {
+  $('fileSearch').value = '';
+  setFileSearch('');
+  $('fileSearch').focus();
 }
 
 function setFileFilter(f) {
@@ -323,6 +465,20 @@ function fileExtFromName(name) {
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Encadre la sous-chaine matchee par state.fileSearch dans <span class="match">. */
+function highlightSearch(s) {
+  const escaped = escapeHtml(s);
+  if (!state.fileSearch) return escaped;
+  const q = state.fileSearch.toLowerCase();
+  const lower = s.toLowerCase();
+  const idx = lower.indexOf(q);
+  if (idx < 0) return escaped;
+  // On reapplique l'escape sur les 3 segments en se basant sur la chaine d'origine.
+  return escapeHtml(s.substring(0, idx))
+       + '<span class="match">' + escapeHtml(s.substring(idx, idx + q.length)) + '</span>'
+       + escapeHtml(s.substring(idx + q.length));
 }
 
 /* Tokenizer single-pass : on travaille sur la chaîne BRUTE et on n'échappe
@@ -545,7 +701,7 @@ function renderTreeNode(node, depth) {
 
     fileDiv.innerHTML = `
       <span class="file-status-dot ${status}" title="${status}"></span>
-      <span class="tree-file-name">${escapeHtml(f._displayName || f.name)}</span>
+      <span class="tree-file-name">${highlightSearch(f._displayName || f.name)}</span>
       ${countHtml}
     `;
     wrap.appendChild(fileDiv);
@@ -568,6 +724,7 @@ function renderCode() {
     $('btnFixAndSave').disabled = true;
     $('btnVerify').disabled = true;
     $('btnDiff').disabled = true;
+    $('btnSplit').disabled = true;
     $('btnDownload').disabled = true;
     $('btnSaveServer').disabled = true;
     $('btnRestoreServer').disabled = true;
@@ -584,6 +741,10 @@ function renderCode() {
                               || (!file.issues.some(i => i.fixable) && !modified);
   $('btnVerify').disabled = false;
   $('btnDiff').disabled = !modified;
+  // Le bouton Split reste actif meme sans modif : le pane droit affichera
+  // "Aucune modification" et l'utilisateur peut basculer pour preparer la vue.
+  $('btnSplit').disabled = false;
+  $('btnSplit').classList.toggle('toggle-on', state.splitView);
   $('btnDownload').disabled = !modified;
   // Save sur le serveur : seulement si le fichier vient d'un scan ET a ete modifie.
   $('btnSaveServer').disabled = !modified || !file.serverPath;
@@ -593,6 +754,11 @@ function renderCode() {
 
   if (state.viewMode === 'diff') {
     renderDiff();
+    return;
+  }
+
+  if (state.splitView) {
+    renderSplit(file);
     return;
   }
 
@@ -625,6 +791,138 @@ function renderCode() {
   });
   html += '</div>';
   area.innerHTML = html;
+  attachIssueScrollSync();
+}
+
+/**
+ * Vue split : code (avec issues) a gauche, diff avant/apres a droite.
+ * Les deux panneaux partagent la meme zone scrollable verticale. Si pas
+ * de modif, le pane droit affiche un placeholder explicite pour que
+ * l'utilisateur sache pourquoi le diff est vide.
+ */
+function renderSplit(file) {
+  const area = $('codeArea');
+  const modified = file.current !== file.original;
+  const lines = file.current.split(/\r?\n/);
+  const issuesByLine = new Map();
+  file.issues.forEach(i => {
+    if (!issuesByLine.has(i.line)) issuesByLine.set(i.line, []);
+    issuesByLine.get(i.line).push(i);
+  });
+
+  let leftHtml = '<div class="code-viewer">';
+  lines.forEach((line, idx) => {
+    const lineNum = idx + 1;
+    const lineIssues = issuesByLine.get(lineNum) || [];
+    let cls = 'code-line';
+    let marker = '';
+    if (lineIssues.length > 0) {
+      const sev = lineIssues.some(i => i.severity === 'error') ? 'error'
+                : lineIssues.some(i => i.severity === 'warning') ? 'warning' : 'info';
+      cls += ' has-' + (sev === 'error' ? 'issue' : sev);
+      marker = `<span class="line-marker ${sev}">●</span>`;
+    } else {
+      marker = `<span class="line-marker"></span>`;
+    }
+    leftHtml += `<div class="${cls}" data-line="${lineNum}">
+      <span class="line-number">${lineNum}</span>
+      ${marker}
+      <span class="line-content">${highlightLine(line) || ' '}</span>
+    </div>`;
+  });
+  leftHtml += '</div>';
+
+  let rightHtml;
+  if (!modified) {
+    rightHtml = `<div class="diff-empty">
+      <div class="diff-empty-headline">Aucune modification.</div>
+      <div>Applique une correction (⚡ ou un bouton "Appliquer la correction" sur une issue) pour voir le diff côté droit.</div>
+    </div>`;
+  } else {
+    const oldLines = file.original.split(/\r?\n/);
+    const newLines = file.current.split(/\r?\n/);
+    const ops = pairSimilarOps(lineDiff(oldLines, newLines));
+    rightHtml = '<div class="diff-viewer">';
+    ops.forEach(op => rightHtml += renderDiffOp(op));
+    rightHtml += '</div>';
+  }
+
+  area.innerHTML = `
+    <div class="split-container">
+      <div class="split-pane">
+        <div class="split-pane-label">Actuel</div>
+        ${leftHtml}
+      </div>
+      <div class="split-pane">
+        <div class="split-pane-label">Diff avant / après</div>
+        ${rightHtml}
+      </div>
+    </div>
+  `;
+  attachIssueScrollSync();
+}
+
+/**
+ * Sticky issue panel : quand l'utilisateur scrolle dans le code, on
+ * surligne dans le panneau de droite l'issue dont la ligne est la plus
+ * proche du haut du viewport. Si le panneau est dans un autre filtre
+ * (errors only, etc.) on ne fait rien, le sync n'a pas lieu d'etre.
+ */
+let scrollSyncRaf = null;
+function attachIssueScrollSync() {
+  const area = $('codeArea');
+  if (!area) return;
+  area.onscroll = () => {
+    if (scrollSyncRaf) cancelAnimationFrame(scrollSyncRaf);
+    scrollSyncRaf = requestAnimationFrame(syncIssuePanel);
+  };
+}
+
+function syncIssuePanel() {
+  const area = $('codeArea');
+  const issuesList = $('issuesList');
+  if (!area || !issuesList) return;
+  const file = currentFile();
+  if (!file || file.issues.length === 0) return;
+
+  // Trouve la ligne au sommet du viewport visible.
+  const areaRect = area.getBoundingClientRect();
+  const lineEls = area.querySelectorAll('.code-line[data-line]');
+  let topLine = null;
+  for (const el of lineEls) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom >= areaRect.top) {
+      topLine = parseInt(el.dataset.line, 10);
+      break;
+    }
+  }
+  if (topLine == null) return;
+
+  // Trouve l'issue la plus proche au-dessus ou a topLine.
+  const sorted = file.issues.slice().sort((a, b) => a.line - b.line);
+  let active = sorted[0];
+  for (const i of sorted) {
+    if (i.line <= topLine) active = i;
+    else break;
+  }
+
+  // Surligne le bloc d'issue correspondant et le scrolle dans le panneau.
+  issuesList.querySelectorAll('.issue.sticky-active').forEach(el => el.classList.remove('sticky-active'));
+  if (!active) return;
+  // On cherche un bloc qui contient L{line}: dans son innerHTML — heuristique simple.
+  const issueEls = issuesList.querySelectorAll('.issue');
+  for (const el of issueEls) {
+    const loc = el.querySelector('.issue-location');
+    if (loc && loc.textContent.startsWith('L' + active.line + ':')) {
+      el.classList.add('sticky-active');
+      const elRect = el.getBoundingClientRect();
+      const listRect = issuesList.getBoundingClientRect();
+      if (elRect.top < listRect.top || elRect.bottom > listRect.bottom) {
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      }
+      break;
+    }
+  }
 }
 
 /* ============================================================
@@ -681,9 +979,12 @@ function renderDiff() {
   const oldLines = file.original.split(/\r?\n/);
   const newLines = file.current.split(/\r?\n/);
   const ops = lineDiff(oldLines, newLines);
-  const adds = ops.filter(o => o.type === 'add').length;
-  const dels = ops.filter(o => o.type === 'del').length;
-  const eqs  = ops.filter(o => o.type === 'eq').length;
+  // Apparie les del+add adjacents qui sont "similaires" pour faire un char-diff
+  // intra-ligne — bien plus lisible quand un fix change juste 2-3 caracteres.
+  const pairedOps = pairSimilarOps(ops);
+  const adds = pairedOps.filter(o => o.type === 'add' || o.type === 'paired').length;
+  const dels = pairedOps.filter(o => o.type === 'del' || o.type === 'paired').length;
+  const eqs  = pairedOps.filter(o => o.type === 'eq').length;
 
   let html = `<div class="diff-stats">
     <span class="diff-stats-label">comparaison avant / après</span>
@@ -692,26 +993,165 @@ function renderDiff() {
     <span style="color:var(--text-faint)">${eqs} ligne(s) inchangée(s)</span>
   </div>`;
   html += '<div class="diff-viewer">';
-  ops.forEach(op => {
-    const oldNum = op.oi !== undefined ? op.oi : '';
-    const newNum = op.ni !== undefined ? op.ni : '';
-    let cls = 'diff-line';
-    let mark = ' ';
-    if (op.type === 'add') { cls += ' add'; mark = '+'; }
-    else if (op.type === 'del') { cls += ' del'; mark = '−'; }
-    html += `<div class="${cls}">
-      <span class="diff-old-num">${oldNum}</span>
-      <span class="diff-new-num">${newNum}</span>
-      <span class="diff-mark">${mark}</span>
-      <span class="diff-content">${highlightLine(op.text) || ' '}</span>
-    </div>`;
-  });
+  pairedOps.forEach(op => html += renderDiffOp(op));
   html += '</div>';
   area.innerHTML = html;
+  attachIssueScrollSync();
+}
+
+/**
+ * Apparie les del/add adjacents en "paired" si les lignes sont similaires
+ * (>= 50% de caracteres communs via LCS). Sur un fix typique du linter qui
+ * change quelques tokens, ca evite l'affichage del + add complet et permet
+ * un highlight intra-ligne.
+ */
+function pairSimilarOps(ops) {
+  const out = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    // Cherche un pattern del puis add (ou add puis del) consecutif ou separe
+    // par d'autres del/add du meme groupe de hunk.
+    if (op.type === 'del' && i + 1 < ops.length && ops[i + 1].type === 'add') {
+      const next = ops[i + 1];
+      if (lineSimilarity(op.text, next.text) >= 0.5) {
+        out.push({
+          type: 'paired',
+          oldText: op.text, newText: next.text,
+          oi: op.oi, ni: next.ni
+        });
+        i++;
+        continue;
+      }
+    }
+    out.push(op);
+  }
+  return out;
+}
+
+function lineSimilarity(a, b) {
+  // Similarite estimee = 2 * LCS(a, b) / (|a| + |b|), borne dans [0, 1].
+  // Pour des lignes courtes on utilise une matrice DP ; au-dela de 200 chars
+  // on degrade en heuristique approximative pour ne pas exploser le CPU.
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  const al = a.length, bl = b.length;
+  if (al + bl === 0) return 1;
+  if (al > 200 || bl > 200) {
+    // Approximation : ratio de chars communs (sans ordre).
+    const setB = new Map();
+    for (const c of b) setB.set(c, (setB.get(c) || 0) + 1);
+    let common = 0;
+    for (const c of a) {
+      const n = setB.get(c) || 0;
+      if (n > 0) { common++; setB.set(c, n - 1); }
+    }
+    return (2 * common) / (al + bl);
+  }
+  // LCS DP exact
+  const dp = new Array(bl + 1).fill(0);
+  for (let i = 1; i <= al; i++) {
+    let prev = 0;
+    for (let j = 1; j <= bl; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return (2 * dp[bl]) / (al + bl);
+}
+
+/**
+ * Char-diff via LCS sur les caracteres. Renvoie une liste de segments :
+ * { type: 'eq'|'del'|'add', text }. Capping a 1000 chars/cote pour eviter
+ * des matrices > 1M cellules sur des lignes pathologiques.
+ */
+function charDiff(oldLine, newLine) {
+  const a = oldLine, b = newLine;
+  if (a === b) return [{ type: 'eq', text: a }];
+  if (a.length > 1000 || b.length > 1000) {
+    return [{ type: 'del', text: a }, { type: 'add', text: b }];
+  }
+  const m = a.length, n = b.length;
+  const dp = [];
+  for (let i = 0; i <= m; i++) dp.push(new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  const segs = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      segs.unshift({ type: 'eq', text: a[i - 1] }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      segs.unshift({ type: 'add', text: b[j - 1] }); j--;
+    } else {
+      segs.unshift({ type: 'del', text: a[i - 1] }); i--;
+    }
+  }
+  // Coalesce les segments contigus de meme type.
+  const merged = [];
+  for (const s of segs) {
+    if (merged.length > 0 && merged[merged.length - 1].type === s.type) {
+      merged[merged.length - 1].text += s.text;
+    } else {
+      merged.push({ ...s });
+    }
+  }
+  return merged;
+}
+
+function renderDiffOp(op) {
+  const oldNum = op.oi !== undefined ? op.oi : '';
+  const newNum = op.ni !== undefined ? op.ni : '';
+  if (op.type === 'paired') {
+    // Une ligne avec char-diff inline.
+    const segs = charDiff(op.oldText, op.newText);
+    const oldHtml = segs
+      .filter(s => s.type === 'eq' || s.type === 'del')
+      .map(s => s.type === 'eq' ? escapeHtml(s.text) : `<span class="char-del">${escapeHtml(s.text)}</span>`)
+      .join('') || ' ';
+    const newHtml = segs
+      .filter(s => s.type === 'eq' || s.type === 'add')
+      .map(s => s.type === 'eq' ? escapeHtml(s.text) : `<span class="char-add">${escapeHtml(s.text)}</span>`)
+      .join('') || ' ';
+    return `<div class="diff-line del paired">
+      <span class="diff-old-num">${oldNum}</span>
+      <span class="diff-new-num"></span>
+      <span class="diff-mark">−</span>
+      <span class="diff-content">${oldHtml}</span>
+    </div>
+    <div class="diff-line add paired">
+      <span class="diff-old-num"></span>
+      <span class="diff-new-num">${newNum}</span>
+      <span class="diff-mark">+</span>
+      <span class="diff-content">${newHtml}</span>
+    </div>`;
+  }
+  let cls = 'diff-line';
+  let mark = ' ';
+  if (op.type === 'add') { cls += ' add'; mark = '+'; }
+  else if (op.type === 'del') { cls += ' del'; mark = '−'; }
+  return `<div class="${cls}">
+    <span class="diff-old-num">${oldNum}</span>
+    <span class="diff-new-num">${newNum}</span>
+    <span class="diff-mark">${mark}</span>
+    <span class="diff-content">${highlightLine(op.text) || ' '}</span>
+  </div>`;
 }
 
 function toggleDiff() {
   state.viewMode = state.viewMode === 'diff' ? 'code' : 'diff';
+  state.splitView = false;   // diff seul desactive le split
+  renderCode();
+}
+
+function toggleSplitView() {
+  state.splitView = !state.splitView;
+  state.viewMode = 'code';   // base : on affiche le code, le split ajoute le diff a droite
   renderCode();
 }
 
@@ -829,6 +1269,7 @@ function renderAll() {
   renderCode();
   renderIssues();
   renderStats();
+  schedulePersist();
 
   const file = currentFile();
   if (file) {
@@ -1324,15 +1765,31 @@ async function fixAllInProject() {
   if (files.length === 0) { showToast('Aucun fichier.', 'error'); return; }
   if (!confirm(`Lancer "Tout corriger" sur ${files.length} fichier(s) (${scope === 'selection' ? 'sélection' : 'projet entier'}) ?`)) return;
 
+  const report = { title: `Tout corriger — ${scope === 'selection' ? 'sélection' : 'projet entier'}`, rows: [] };
   let fixedFiles = 0;
   let totalFixes = 0;
   for (const f of files) {
+    const issuesBefore = f.issues.length;
     const n = await applyAllFixes(f);
+    const issuesAfter = f.issues.length;
+    report.rows.push({
+      file: f.name,
+      fixes: n,
+      issuesBefore,
+      issuesAfter,
+      delta: issuesBefore - issuesAfter,
+      status: n > 0 ? 'fixed' : (issuesBefore === 0 ? 'clean' : 'unchanged')
+    });
     if (n > 0) { fixedFiles++; totalFixes += n; }
   }
   showToast(`Auto-fix : ${totalFixes} correction(s) sur ${fixedFiles} fichier(s).`,
             totalFixes > 0 ? 'success' : 'error');
   renderAll();
+  showBatchReport(report, [
+    `Total fichiers traités : <strong>${files.length}</strong>`,
+    `Fichiers modifiés : <strong>${fixedFiles}</strong>`,
+    `Corrections appliquées : <strong style="color:var(--success)">${totalFixes}</strong>`,
+  ]);
 }
 
 async function saveAllModified() {
@@ -1344,6 +1801,7 @@ async function saveAllModified() {
   }
   if (!confirm(`Écrire ${targets.length} fichier(s) sur le disque (${scope === 'selection' ? 'sélection' : 'projet entier'}) ?\nUn .bak est créé avant chaque écrasement.`)) return;
 
+  const report = { title: `Tout enregistrer — ${scope === 'selection' ? 'sélection' : 'projet entier'}`, rows: [] };
   let ok = 0, ko = 0;
   for (const f of targets) {
     try {
@@ -1353,14 +1811,28 @@ async function saveAllModified() {
         body: JSON.stringify({ path: f.serverPath, content: f.current })
       });
       if (r.ok) {
+        const data = await r.json();
         f.original = f.current;
         await runAnalysis(f);
         ok++;
-      } else { ko++; }
-    } catch { ko++; }
+        report.rows.push({ file: f.name, bytes: data.bytes, status: 'saved' });
+      } else {
+        ko++;
+        const txt = await r.text().catch(() => '');
+        report.rows.push({ file: f.name, status: 'error', error: `${r.status}: ${(txt || '').slice(0, 120)}` });
+      }
+    } catch (e) {
+      ko++;
+      report.rows.push({ file: f.name, status: 'error', error: e.message });
+    }
   }
   showToast(`Sauvegarde : ${ok} OK${ko > 0 ? `, ${ko} KO` : ''}.`, ko > 0 ? 'error' : 'success');
   renderAll();
+  showBatchReport(report, [
+    `Fichiers candidats : <strong>${targets.length}</strong>`,
+    `Enregistrés : <strong style="color:var(--success)">${ok}</strong>`,
+    ko > 0 ? `Échecs : <strong style="color:var(--error)">${ko}</strong>` : null,
+  ].filter(Boolean));
 }
 
 async function fixAndSaveProject() {
@@ -1373,11 +1845,16 @@ async function fixAndSaveProject() {
   }
   if (!confirm(`Corriger + enregistrer ${writable.length} fichier(s) (${scope === 'selection' ? 'sélection' : 'projet entier'}) ?`)) return;
 
+  const report = { title: `Corriger & enregistrer — ${scope === 'selection' ? 'sélection' : 'projet entier'}`, rows: [] };
   let fixed = 0, saved = 0, ko = 0;
   for (const f of writable) {
+    const issuesBefore = f.issues.length;
     const n = await applyAllFixes(f);
     fixed += n;
-    if (f.current === f.original) continue;   // rien a sauvegarder
+    if (f.current === f.original) {
+      report.rows.push({ file: f.name, fixes: n, issuesBefore, issuesAfter: f.issues.length, delta: issuesBefore - f.issues.length, status: 'unchanged' });
+      continue;
+    }
     try {
       const r = await fetch('/api/save', {
         method: 'POST',
@@ -1385,16 +1862,73 @@ async function fixAndSaveProject() {
         body: JSON.stringify({ path: f.serverPath, content: f.current })
       });
       if (r.ok) {
+        const data = await r.json();
         f.original = f.current;
         await runAnalysis(f);
         saved++;
-      } else { ko++; }
-    } catch { ko++; }
+        report.rows.push({ file: f.name, fixes: n, issuesBefore, issuesAfter: f.issues.length, delta: issuesBefore - f.issues.length, bytes: data.bytes, status: 'fixed-saved' });
+      } else {
+        ko++;
+        const txt = await r.text().catch(() => '');
+        report.rows.push({ file: f.name, fixes: n, issuesBefore, issuesAfter: f.issues.length, delta: issuesBefore - f.issues.length, status: 'save-error', error: `${r.status}: ${(txt || '').slice(0, 120)}` });
+      }
+    } catch (e) {
+      ko++;
+      report.rows.push({ file: f.name, fixes: n, status: 'save-error', error: e.message });
+    }
   }
   showToast(`${fixed} correction(s), ${saved} fichier(s) enregistré(s)${ko > 0 ? `, ${ko} KO` : ''}.`,
             ko > 0 ? 'error' : 'success');
   renderAll();
+  showBatchReport(report, [
+    `Fichiers traités : <strong>${writable.length}</strong>`,
+    `Corrections : <strong style="color:var(--success)">${fixed}</strong>`,
+    `Enregistrés : <strong>${saved}</strong>`,
+    ko > 0 ? `Échecs save : <strong style="color:var(--error)">${ko}</strong>` : null,
+  ].filter(Boolean));
 }
+
+/* ============================================================
+   BATCH REPORT MODAL — utilise par les actions en lot
+   ============================================================ */
+function showBatchReport(report, summaryLines) {
+  $('batchReportTitle').textContent = report.title;
+  $('batchReportSummary').innerHTML = summaryLines.map(l => `<div>${l}</div>`).join('');
+  const list = $('batchReportList');
+  if (!report.rows || report.rows.length === 0) {
+    list.innerHTML = '<div class="batch-report-empty">Aucun détail à afficher.</div>';
+  } else {
+    list.innerHTML = report.rows.map(r => {
+      let statusBadge = '';
+      let statusClass = '';
+      switch (r.status) {
+        case 'fixed':       statusBadge = `+${r.fixes} fix`; statusClass = 'ok'; break;
+        case 'fixed-saved': statusBadge = `+${r.fixes} fix · ${r.bytes}o`; statusClass = 'ok'; break;
+        case 'saved':       statusBadge = `${r.bytes}o`; statusClass = 'ok'; break;
+        case 'unchanged':   statusBadge = 'inchangé'; statusClass = 'muted'; break;
+        case 'clean':       statusBadge = 'propre'; statusClass = 'muted'; break;
+        case 'error':       statusBadge = 'erreur'; statusClass = 'err'; break;
+        case 'save-error':  statusBadge = 'save KO'; statusClass = 'err'; break;
+        default:            statusBadge = r.status || ''; break;
+      }
+      const delta = r.delta !== undefined ? ` <span class="batch-row-delta">issues : ${r.issuesBefore} → ${r.issuesAfter}</span>` : '';
+      const err = r.error ? `<div class="batch-row-error">${escapeHtml(r.error)}</div>` : '';
+      return `
+        <div class="batch-row ${statusClass}">
+          <span class="batch-row-status">${statusBadge}</span>
+          <div class="batch-row-main">
+            <div class="batch-row-file">${escapeHtml(r.file)}</div>
+            ${delta}
+            ${err}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  $('batchReportModal').classList.add('show');
+}
+
+function closeBatchReport() { $('batchReportModal').classList.remove('show'); }
 
 /** Combo sur le fichier courant : Tout corriger + Enregistrer. */
 async function fixAndSaveCurrent() {
@@ -1759,12 +2293,222 @@ async function useDroppedEntriesFallback() {
   await handleDroppedEntries(collected);
 }
 
+/* ============================================================
+   COMMAND PALETTE (Ctrl+P) — fichiers + commandes
+   ============================================================ */
+
+let paletteState = { items: [], selected: 0 };
+
+const PALETTE_COMMANDS = [
+  { name: 'Tout corriger (fichier courant)', icon: '⚡', run: () => fixAllInCurrent() },
+  { name: 'Tout corriger (projet)',          icon: '⚡', run: () => fixAllInProject() },
+  { name: 'Corriger & enregistrer (fichier)', icon: '✨', run: () => fixAndSaveCurrent() },
+  { name: 'Corriger & enregistrer (projet)', icon: '✨', run: () => fixAndSaveProject() },
+  { name: 'Tout enregistrer',                icon: '💾', run: () => saveAllModified() },
+  { name: 'Re-vérifier le fichier courant',  icon: '🔍', run: () => verifyCurrent() },
+  { name: 'Basculer Avant / Après',          icon: '⇆',  run: () => toggleDiff() },
+  { name: 'Basculer Split View',             icon: '◫',  run: () => toggleSplitView() },
+  { name: 'Télécharger le fichier corrigé',  icon: '⬇',  run: () => downloadCurrent() },
+  { name: 'Exporter le rapport (Markdown)',  icon: '📊', run: () => exportReport() },
+  { name: 'Scanner un dossier serveur',      icon: '📂', run: () => scanServerFolder() },
+  { name: 'Charger un fichier',              icon: '📄', run: () => $('fileInput').click() },
+  { name: 'Coller du code',                  icon: '📋', run: () => openPasteModal() },
+  { name: 'Charger un exemple',              icon: '🎯', run: () => loadDemo() },
+  { name: 'Voir les règles',                 icon: '📖', run: () => openRulesModal() }
+];
+
+function openPalette() {
+  $('paletteModal').classList.add('show');
+  $('paletteInput').value = '';
+  $('paletteInput').focus();
+  paletteState.selected = 0;
+  renderPalette();
+}
+
+function closePalette() { $('paletteModal').classList.remove('show'); }
+
+function renderPalette() {
+  const q = ($('paletteInput').value || '').trim();
+  let items;
+  if (q.startsWith('>')) {
+    // Mode commandes : on filtre les commandes par leur nom
+    const sub = q.slice(1).trim().toLowerCase();
+    items = PALETTE_COMMANDS
+      .filter(c => !sub || c.name.toLowerCase().includes(sub))
+      .map(c => ({ kind: 'cmd', cmd: c, label: c.name, icon: c.icon }));
+  } else {
+    // Mode fichiers : substring case-insensitive sur le path
+    const sub = q.toLowerCase();
+    items = state.files
+      .filter(f => !sub || (f.name || '').toLowerCase().includes(sub))
+      .slice(0, 100)
+      .map(f => {
+        const status = computeFileStatus(f);
+        const dot = `<span class="palette-dot ${status}"></span>`;
+        return { kind: 'file', file: f, label: f.name, html: dot };
+      });
+  }
+  paletteState.items = items;
+  if (paletteState.selected >= items.length) paletteState.selected = Math.max(0, items.length - 1);
+
+  const list = $('paletteResults');
+  if (items.length === 0) {
+    list.innerHTML = '<div class="palette-empty">Aucun résultat.</div>';
+    return;
+  }
+  list.innerHTML = items.map((it, i) => `
+    <div class="palette-item ${i === paletteState.selected ? 'selected' : ''}" data-index="${i}" onclick="runPaletteItem(${i})" onmouseenter="paletteHover(${i})">
+      ${it.icon ? `<span class="palette-icon">${it.icon}</span>` : (it.html || '')}
+      <span class="palette-label">${highlightSearchInPalette(it.label, q.startsWith('>') ? q.slice(1).trim() : q)}</span>
+      <span class="palette-kind">${it.kind === 'cmd' ? 'commande' : ''}</span>
+    </div>
+  `).join('');
+  // Scroll the selected item into view.
+  const sel = list.querySelector('.palette-item.selected');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+
+function highlightSearchInPalette(text, q) {
+  if (!q) return escapeHtml(text);
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(q.toLowerCase());
+  if (idx < 0) return escapeHtml(text);
+  return escapeHtml(text.substring(0, idx))
+       + '<span class="match">' + escapeHtml(text.substring(idx, idx + q.length)) + '</span>'
+       + escapeHtml(text.substring(idx + q.length));
+}
+
+function paletteHover(i) {
+  if (paletteState.selected === i) return;
+  paletteState.selected = i;
+  renderPalette();
+}
+
+function runPaletteItem(index) {
+  const it = paletteState.items[index];
+  if (!it) return;
+  closePalette();
+  if (it.kind === 'file') {
+    state.currentFileId = it.file.id;
+    state.selectedFileIds = new Set([it.file.id]);
+    state.viewMode = 'code';
+    renderAll();
+  } else if (it.kind === 'cmd') {
+    it.cmd.run();
+  }
+}
+
+function handlePaletteKey(e) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    paletteState.selected = Math.min(paletteState.items.length - 1, paletteState.selected + 1);
+    renderPalette();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    paletteState.selected = Math.max(0, paletteState.selected - 1);
+    renderPalette();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    runPaletteItem(paletteState.selected);
+  } else if (e.key === 'Escape') {
+    closePalette();
+  }
+}
+
+/* ============================================================
+   GLOBAL KEYBOARD SHORTCUTS
+   ============================================================
+   Ctrl+P        — palette (fichiers + commandes via prefix `>`)
+   Ctrl+S        — Enregistrer le fichier courant
+   Ctrl+Shift+S  — Enregistrer tous les fichiers modifies
+   Ctrl+Shift+F  — Tout corriger (fichier courant)
+   Ctrl+Alt+F    — Tout corriger (projet)
+   Ctrl+R        — Re-verifier
+   Ctrl+D        — Toggle Avant/Apres
+   Esc           — Ferme le modal courant
+   F5            — desactive (nuisible dans une dashboard)
+   ============================================================ */
+function isInputFocused() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+}
+
 document.addEventListener('keydown', (e) => {
+  // Esc ferme tout modal ouvert.
   if (e.key === 'Escape') {
     closePasteModal();
     closeRulesModal();
+    closeBrowseModal();
+    closePalette();
+    closeBatchReport();
+    return;
+  }
+
+  // Si l'utilisateur tape dans un input/textarea, on laisse passer la plupart
+  // des raccourcis sauf Ctrl+P qu'on intercepte toujours (sinon Chrome ouvre
+  // sa boite "Imprimer").
+  const inInput = isInputFocused();
+
+  // Ctrl/Cmd+P — palette (intercept toujours)
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    openPalette();
+    return;
+  }
+
+  if (inInput) return;   // les autres ne s'appliquent pas dans un input
+
+  // Ctrl+Shift+F — Tout corriger projet
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault(); fixAllInProject(); return;
+  }
+  // Ctrl+Shift+S — Enregistrer tout
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault(); saveAllModified(); return;
+  }
+  // Ctrl+S — Enregistrer fichier courant
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault(); saveCurrentToServer(); return;
+  }
+  // Ctrl+Alt+F — Tout corriger (fichier courant)
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault(); fixAllInCurrent(); return;
+  }
+  // Ctrl+R — Re-verifier
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+    e.preventDefault(); verifyCurrent(); return;
+  }
+  // Ctrl+D — toggle diff
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+    e.preventDefault(); toggleDiff(); return;
+  }
+  // Fleches haut/bas : naviguer entre fichiers
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    navigateFile(e.key === 'ArrowDown' ? 1 : -1);
   }
 });
+
+function navigateFile(direction) {
+  const visible = state.files.filter(f => fileMatchesFilter(f, state.fileFilter));
+  if (visible.length === 0) return;
+  let idx = visible.findIndex(f => f.id === state.currentFileId);
+  if (idx < 0) idx = direction > 0 ? -1 : visible.length;
+  let next = idx + direction;
+  if (next < 0) next = visible.length - 1;
+  if (next >= visible.length) next = 0;
+  state.currentFileId = visible[next].id;
+  state.selectedFileIds = new Set([visible[next].id]);
+  state.viewMode = 'code';
+  renderAll();
+  // Scroll the active file into view in the tree
+  setTimeout(() => {
+    const el = document.querySelector('.tree-file.active');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, 50);
+}
 
 initDragDrop();
 
@@ -1773,6 +2517,9 @@ initDragDrop();
 // au debut du script).
 (async () => {
   loadThemeFromStorage();
+  persistEnabled = isPersistEnabled();
+  $('persistToggle').checked = persistEnabled;
   await loadRulesFromServer();
+  if (persistEnabled) await maybeRestoreFromStorage();
   renderAll();
 })();

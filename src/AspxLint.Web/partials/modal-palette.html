@@ -1,0 +1,14 @@
+<!-- Command Palette (Ctrl+P) -->
+<div class="modal-overlay" id="paletteModal">
+  <div class="modal palette-modal">
+    <div class="modal-header">
+      <input type="text" id="paletteInput" class="palette-input" placeholder="Tapez pour filtrer les fichiers, ou >cmd pour les commandes…" oninput="renderPalette()" onkeydown="handlePaletteKey(event)" autocomplete="off" />
+    </div>
+    <div class="modal-body palette-body">
+      <div class="palette-results" id="paletteResults"></div>
+    </div>
+    <div class="modal-footer palette-footer">
+      <span class="palette-hint">↑↓ naviguer · Enter ouvrir · Esc fermer · &gt; pour les commandes</span>
+    </div>
+  </div>
+</div>

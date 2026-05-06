@@ -268,6 +268,35 @@
     padding: 4px 0;
   }
 
+  /* ====== File search (juste en-dessous de la dropzone) ====== */
+  .file-search {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    align-items: center;
+  }
+  .file-search input[type="text"] {
+    flex: 1;
+    background: var(--bg-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .file-search input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .tree-file-name .match {
+    background: rgba(212, 255, 58, 0.25);
+    color: var(--accent);
+    border-radius: 2px;
+  }
+
   /* ====== File filter (au-dessus de l'arbre) ====== */
   .file-filter {
     display: flex;
@@ -833,6 +862,19 @@
   .diff-line.add { background: rgba(94, 255, 140, 0.06); }
   .diff-line.del { background: rgba(255, 94, 94, 0.06); }
   .diff-line.del .diff-content { text-decoration: line-through; text-decoration-color: rgba(255, 94, 94, 0.3); }
+  /* Quand on a un char-diff intra-ligne (paired), pas de strike sur tout le contenu :
+     seuls les segments .char-del le sont. */
+  .diff-line.paired.del .diff-content { text-decoration: none; }
+  .char-del {
+    background: rgba(255, 94, 94, 0.18);
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 94, 94, 0.5);
+    border-radius: 2px;
+  }
+  .char-add {
+    background: rgba(94, 255, 140, 0.18);
+    border-radius: 2px;
+  }
   .diff-old-num, .diff-new-num {
     width: 38px;
     padding-right: 6px;
@@ -876,6 +918,39 @@
     color: var(--bg);
     border-color: var(--accent);
     font-weight: 600;
+  }
+
+  /* Split view : code a gauche, diff a droite, partage du scroll vertical */
+  .split-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .split-pane {
+    border-right: 1px solid var(--border);
+    overflow-x: auto;
+    min-width: 0;
+  }
+  .split-pane:last-child { border-right: none; }
+  .split-pane-label {
+    position: sticky;
+    top: 0;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+    z-index: 5;
+  }
+
+  /* Sticky issue : surligne l'issue active synchro avec le scroll du code */
+  .issue.sticky-active {
+    background: var(--bg-3);
+    border-left: 3px solid var(--accent);
+    padding-left: 13px;
   }
   .modal-overlay {
     display: none;
@@ -1019,6 +1094,142 @@
     margin-top: 16px;
   }
   .modal-section-title:first-child { margin-top: 0; }
+
+  /* Command palette modal */
+  .palette-modal { max-width: 600px; max-height: 70vh; }
+  .palette-modal .modal-header {
+    padding: 8px 12px;
+  }
+  .palette-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 14px;
+  }
+  .palette-input:focus { outline: none; border-color: var(--accent); }
+  .palette-body { padding: 0; }
+  .palette-results { max-height: 50vh; overflow-y: auto; }
+  .palette-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .palette-item:last-child { border-bottom: none; }
+  .palette-item.selected { background: var(--bg-hover); border-left: 3px solid var(--accent); padding-left: 13px; }
+  .palette-item:hover { background: var(--bg-hover); }
+  .palette-icon { width: 16px; text-align: center; flex-shrink: 0; }
+  .palette-label { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .palette-label .match { background: rgba(212, 255, 58, 0.25); color: var(--accent); border-radius: 2px; }
+  .palette-kind { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+  .palette-empty { padding: 24px; text-align: center; color: var(--text-faint); }
+  .palette-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .palette-dot.errors    { background: var(--error); }
+  .palette-dot.warnings  { background: var(--warning); }
+  .palette-dot.info      { background: var(--info); }
+  .palette-dot.clean     { background: var(--success); }
+  .palette-dot.modified  { background: var(--accent); }
+  .palette-dot.corrected { border: 2px solid var(--success); background: transparent; box-sizing: border-box; }
+  .palette-footer { padding: 6px 16px; }
+  .palette-hint {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+
+  /* Batch report modal */
+  .batch-report-modal { max-width: 800px; }
+  .batch-report-summary {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .batch-report-list {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+  .batch-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+  }
+  .batch-row:last-child { border-bottom: none; }
+  .batch-row-status {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    background: var(--bg-2);
+    color: var(--text-dim);
+    font-weight: 600;
+    width: 100px;
+    text-align: center;
+  }
+  .batch-row.ok    .batch-row-status { background: var(--success-bg); color: var(--success); }
+  .batch-row.err   .batch-row-status { background: var(--error-bg); color: var(--error); }
+  .batch-row.muted .batch-row-status { color: var(--text-faint); }
+  .batch-row-main { flex: 1; min-width: 0; }
+  .batch-row-file {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .batch-row-delta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+  .batch-row-error {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--error);
+    margin-top: 3px;
+    word-break: break-all;
+  }
+  .batch-report-empty { padding: 24px; text-align: center; color: var(--text-faint); }
+
+  /* Persist toggle dans le header */
+  .persist-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .persist-toggle input { cursor: pointer; }
 
   /* Rules list */
   .rules-list {

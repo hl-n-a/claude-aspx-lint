@@ -42,6 +42,12 @@
     <EmbeddedResource Include="..\AspxLint.Web\partials\modal-rules.html"
                       Link="partials\modal-rules.html"
                       LogicalName="AspxLint.Web.partials.modal-rules.html" />
+    <EmbeddedResource Include="..\AspxLint.Web\partials\modal-palette.html"
+                      Link="partials\modal-palette.html"
+                      LogicalName="AspxLint.Web.partials.modal-palette.html" />
+    <EmbeddedResource Include="..\AspxLint.Web\partials\modal-batch-report.html"
+                      Link="partials\modal-batch-report.html"
+                      LogicalName="AspxLint.Web.partials.modal-batch-report.html" />
   </ItemGroup>
 
 </Project>
