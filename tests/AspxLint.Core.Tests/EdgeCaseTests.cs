@@ -343,6 +343,38 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void CHAR001_ignores_ampersand_in_url_query_params()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        // Cas reel rencontre dans Marker_Keyade.ascx : src d'un img tracker
+        // avec plusieurs `&` separateurs de query string. HTML5-compatible.
+        var content = "<img src=\"https://k.example.com/?a=1&b=2&kaClkId=42&kaEvSt=ok\" />\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void CHAR001_ignores_url_params_with_hyphens()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        // Cas reel : `&item-url=...` dans un tracking pixel taboola.
+        var content = "<img src=\"http://x.com/log?marking-type=retargeting&item-url=http://k.com\" />\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void CHAR001_still_fires_on_ampersand_in_text_content()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        // Le cas legitime : du texte HTML avec un `&` non encode.
+        var content = "<p>Tom & Jerry</p>\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        var issues = rule.Detect(content, content.Split('\n'), ctx).ToList();
+        Assert.Single(issues);
+    }
+
+    [Fact]
     public void CHAR001_ignores_ampersand_inside_script_block()
     {
         var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
