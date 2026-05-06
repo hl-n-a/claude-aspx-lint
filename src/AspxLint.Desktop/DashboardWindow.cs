@@ -1,0 +1,99 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Media;
+using AspxLint.Server;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+using MessageBox = System.Windows.MessageBox;
+using WpfColor = System.Windows.Media.Color;
+
+namespace AspxLint.Desktop;
+
+/// <summary>
+/// Fenetre WPF qui affiche la dashboard via un WebView2 embarque. Pas d'URL
+/// bar, pas de devtools (F12 / Ctrl+Shift+I), pas de menu contextuel (donc
+/// "Voir le code source" desactive), pas de raccourcis browser (Ctrl+S, Ctrl+P,
+/// Ctrl+F, etc.) — l'utilisateur ne voit qu'une appli desktop "perso".
+/// </summary>
+public sealed class DashboardWindow : Window
+{
+    private readonly WebView2 _webView;
+    private readonly string _url;
+
+    public DashboardWindow(StartedServer server)
+    {
+        _url = server.LocalUrl;
+        Title = $"ASPX·LINT  •  build {server.BuildId}";
+        Width = 1400;
+        Height = 900;
+        MinWidth = 800;
+        MinHeight = 600;
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Background = new SolidColorBrush(WpfColor.FromRgb(20, 24, 28));
+
+        _webView = new WebView2();
+        Content = _webView;
+
+        Loaded += async (_, _) => await InitializeAsync();
+    }
+
+    private async System.Threading.Tasks.Task InitializeAsync()
+    {
+        try
+        {
+            // Dossier de donnees WebView2 dedie a notre app, pour ne pas
+            // partager le profil avec un autre Edge / autre app.
+            var dataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AspxLint", "WebView2");
+            Directory.CreateDirectory(dataFolder);
+
+            var env = await CoreWebView2Environment.CreateAsync(null, dataFolder);
+            await _webView.EnsureCoreWebView2Async(env);
+
+            var s = _webView.CoreWebView2.Settings;
+            s.AreDevToolsEnabled = false;                // F12 et Ctrl+Shift+I bloques
+            s.AreDefaultContextMenusEnabled = false;     // pas de "Voir source" / "Inspecter"
+            s.AreBrowserAcceleratorKeysEnabled = false;  // Ctrl+S / Ctrl+P / Ctrl+F / F5 / F11 bloques
+            s.IsStatusBarEnabled = false;                // pas de barre d'URL en bas au survol des liens
+            s.IsZoomControlEnabled = true;               // Ctrl+molette pour zoomer reste utile
+
+            // Si un lien externe est cliquable depuis la dashboard (rare),
+            // on l'ouvre dans le navigateur systeme plutot que dans le WebView,
+            // ce qui evite que l'utilisateur "sorte" de la dashboard.
+            _webView.CoreWebView2.NewWindowRequested += (_, args) =>
+            {
+                args.Handled = true;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(args.Uri)
+                { UseShellExecute = true });
+            };
+
+            _webView.CoreWebView2.Navigate(_url);
+        }
+        catch (Exception ex)
+        {
+            // Cas typique : Runtime WebView2 absent (Windows < 11 22H2 sans Edge a jour).
+            // On affiche un message d'erreur lisible plutot qu'un crash silencieux.
+            MessageBox.Show(
+                $"Impossible de charger la dashboard.\n\n{ex.Message}\n\n" +
+                "Le runtime WebView2 est probablement absent. Installe-le depuis " +
+                "https://developer.microsoft.com/microsoft-edge/webview2/",
+                "ASPX-LINT",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// Force le focus sur la fenetre (rappele depuis le tray ou un --activate).
+    /// </summary>
+    public void BringToFront()
+    {
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+}

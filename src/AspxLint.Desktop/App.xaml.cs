@@ -14,11 +14,13 @@ public partial class App : Application
 {
     private NotifyIcon? _trayIcon;
     private StartedServer? _server;
+    private DashboardWindow? _dashboardWindow;
 
     private void OnStartup(object sender, StartupEventArgs e)
     {
         // Mode test : --qr-only <url> ouvre directement la fenetre QR sans serveur
-        // ni icone tray. Permet a la suite FlaUI de l'inspecter.
+        // ni icone tray. Permet a la suite FlaUI de l'inspecter. On skip aussi le
+        // single-instance pour ne pas tuer un autre run de test en parallele.
         var args = Environment.GetCommandLineArgs();
         for (int i = 1; i < args.Length - 1; i++)
         {
@@ -30,6 +32,12 @@ public partial class App : Application
                 return;
             }
         }
+
+        // Single-instance : si un autre AspxLint.Desktop tourne, on le tue avant
+        // de demarrer. L'utilisateur a explicitement demande ce comportement
+        // (relance fraiche a chaque double-clic du .exe) plutot qu'un focus de
+        // l'instance existante. Ca libere aussi le port 5173 du serveur.
+        KillExistingInstances();
 
         try
         {
@@ -49,11 +57,43 @@ public partial class App : Application
 
         BuildTray(_server);
 
-        _trayIcon!.ShowBalloonTip(
-            3000,
-            $"ASPX-LINT  build {_server.BuildId}",
-            $"Dashboard : {_server.LocalUrl}\nClic droit sur l'icone pour le QR code.",
-            ToolTipIcon.Info);
+        // Fenetre principale : WebView2 embarque, pas d'URL bar, pas de devtools.
+        _dashboardWindow = new DashboardWindow(_server);
+        MainWindow = _dashboardWindow;
+        _dashboardWindow.Closed += (_, _) => Shutdown();   // X ferme l'app + tray + serveur
+        _dashboardWindow.Show();
+    }
+
+    /// <summary>
+    /// Tue toute instance AspxLint.Desktop deja en cours (autre que celle-ci).
+    /// On essaie une fermeture propre puis un kill dur si elle ne repond pas en
+    /// 1.5s. Apres kill, on attend brievement que le port 5173 soit relache.
+    /// </summary>
+    private static void KillExistingInstances()
+    {
+        var current = Process.GetCurrentProcess();
+        var others = Process.GetProcessesByName(current.ProcessName)
+            .Where(p => p.Id != current.Id)
+            .ToList();
+        if (others.Count == 0) return;
+
+        foreach (var p in others)
+        {
+            try
+            {
+                if (!p.CloseMainWindow() || !p.WaitForExit(1500))
+                {
+                    p.Kill(entireProcessTree: true);
+                    p.WaitForExit(2000);
+                }
+            }
+            catch { /* deja parti, acces refuse, etc. */ }
+            finally { p.Dispose(); }
+        }
+
+        // Petite pause pour laisser TIME_WAIT relacher le port 5173.
+        // Sans ca, ServerHost.Start() peut crasher avec EADDRINUSE.
+        Thread.Sleep(400);
     }
 
     private void BuildTray(StartedServer s)
@@ -67,7 +107,11 @@ public partial class App : Application
 
         var menu = new ContextMenuStrip();
 
-        menu.Items.Add("Ouvrir le dashboard (local)", null,
+        // L'item principal : focus la fenetre WebView2 (la "vraie" dashboard maintenant).
+        menu.Items.Add("Focus la dashboard", null,
+            (_, _) => _dashboardWindow?.BringToFront());
+
+        menu.Items.Add("Ouvrir dans le navigateur (debug)", null,
             (_, _) => OpenInBrowser(s.LocalUrl));
 
         menu.Items.Add("Copier l'URL LAN (telephone)", null,
@@ -87,7 +131,7 @@ public partial class App : Application
         menu.Items.Add("Quitter", null, (_, _) => Shutdown());
 
         _trayIcon.ContextMenuStrip = menu;
-        _trayIcon.DoubleClick += (_, _) => OpenInBrowser(s.LocalUrl);
+        _trayIcon.DoubleClick += (_, _) => _dashboardWindow?.BringToFront();
     }
 
     private static void ShowQrWindow(string url)
