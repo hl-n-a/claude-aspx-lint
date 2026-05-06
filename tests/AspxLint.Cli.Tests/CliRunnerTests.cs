@@ -219,6 +219,87 @@ public class CliRunnerTests
         Assert.True(found, "La custom rule CUSTOM-TODO devrait avoir matche.");
     }
 
+    // ====== analyze (pour integrations IDE) ======
+
+    [Fact]
+    public void Analyze_path_returns_json_with_issues()
+    {
+        using var tmp = new TempDir();
+        var path = tmp.WriteFile("dirty.aspx",
+            "<%@ Page Language=\"C#\" %>\n<br>\n");
+
+        var (code, stdout, _) = Run("analyze", "--ext", "aspx", path);
+        Assert.True(code == CliRunner.ExitOk || code == CliRunner.ExitIssuesFound);
+
+        var doc = JsonDocument.Parse(stdout);
+        Assert.Equal("aspx", doc.RootElement.GetProperty("ext").GetString());
+        var issues = doc.RootElement.GetProperty("issues");
+        Assert.Equal(JsonValueKind.Array, issues.ValueKind);
+        Assert.True(issues.GetArrayLength() > 0);
+        var first = issues[0];
+        // Schema attendu : ruleId, severity, line, col, snippet, hint.
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("ruleId").GetString()));
+        Assert.True(first.GetProperty("line").GetInt32() > 0);
+    }
+
+    [Fact]
+    public void Analyze_clean_content_returns_empty_issues_and_zero()
+    {
+        using var tmp = new TempDir();
+        var path = tmp.WriteFile("clean.aspx",
+            "<%@ Page Language=\"C#\" %>\n" +
+            "<!DOCTYPE html>\n" +
+            "<html><head><title>x</title></head>\n" +
+            "<body><form runat=\"server\"></form></body>\n" +
+            "</html>\n");
+
+        var (code, stdout, _) = Run("analyze", "--ext", "aspx", path);
+        Assert.Equal(CliRunner.ExitOk, code);
+
+        var doc = JsonDocument.Parse(stdout);
+        Assert.Equal(0, doc.RootElement.GetProperty("issues").GetArrayLength());
+    }
+
+    [Fact]
+    public void Analyze_unknown_path_returns_2()
+    {
+        var fake = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".aspx");
+        var (code, _, stderr) = Run("analyze", "--ext", "aspx", fake);
+        Assert.Equal(CliRunner.ExitError, code);
+        Assert.Contains("introuvable", stderr);
+    }
+
+    [Fact]
+    public void Analyze_no_args_returns_1()
+    {
+        var (code, _, stderr) = Run("analyze");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Analyze_unknown_arg_returns_1()
+    {
+        var (code, _, stderr) = Run("analyze", "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    [Fact]
+    public void Analyze_config_file_routes_to_cfg_rules()
+    {
+        using var tmp = new TempDir();
+        var path = tmp.WriteFile("Web.config",
+            "<configuration><system.web><compilation debug=\"true\" /></system.web></configuration>\n");
+
+        var (_, stdout, _) = Run("analyze", path);
+        var doc = JsonDocument.Parse(stdout);
+        var ids = doc.RootElement.GetProperty("issues").EnumerateArray()
+            .Select(i => i.GetProperty("ruleId").GetString())
+            .ToList();
+        Assert.Contains("CFG-001", ids);
+    }
+
     [Fact]
     public void No_args_prints_usage_and_returns_1()
     {

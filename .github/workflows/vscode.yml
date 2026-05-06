@@ -1,0 +1,72 @@
+name: VSCode extension
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/AspxLint.VSCode/**'
+      - '.github/workflows/vscode.yml'
+  pull_request:
+    paths:
+      - 'src/AspxLint.VSCode/**'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: src/AspxLint.VSCode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: src/AspxLint.VSCode/package-lock.json
+      - name: Install
+        run: npm ci || npm install
+      - name: Compile TypeScript
+        run: npm run compile
+      - name: Package .vsix
+        run: npx --yes @vscode/vsce package --no-yarn
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspx-lint-vsix
+          path: src/AspxLint.VSCode/*.vsix
+          retention-days: 30
+
+  publish:
+    # Publie sur le marketplace VSCode UNIQUEMENT sur publication d'une release
+    # GitHub. Pre-requis : secret repo VSCE_PAT (token PAT Azure DevOps avec
+    # scope Marketplace > Manage). Cf. https://aka.ms/vscode-pat
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: src/AspxLint.VSCode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci || npm install
+      - run: npm run compile
+      - name: Publish to VSCode marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::warning::VSCE_PAT non configure — skip publish."
+            exit 0
+          fi
+          npx --yes @vscode/vsce publish --no-yarn -p "$VSCE_PAT"

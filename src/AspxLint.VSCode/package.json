@@ -1,0 +1,109 @@
+{
+  "name": "aspx-lint",
+  "displayName": "aspx-lint",
+  "description": "Lint et auto-fix pour fichiers ASP.NET Web Forms (.aspx, .ascx, .master, .asax, Web.config). 35 règles, 22 auto-fixables.",
+  "version": "0.3.0",
+  "publisher": "hl-n-a",
+  "license": "MIT",
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "asp.net",
+    "web forms",
+    "aspx",
+    "ascx",
+    "linter",
+    "formatter",
+    "web.config"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hl-n-a/claude-aspx-lint.git",
+    "directory": "src/AspxLint.VSCode"
+  },
+  "homepage": "https://hl-n-a.github.io/claude-aspx-lint/",
+  "bugs": {
+    "url": "https://github.com/hl-n-a/claude-aspx-lint/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:html",
+    "onLanguage:xml",
+    "workspaceContains:**/*.aspx",
+    "workspaceContains:**/*.ascx",
+    "workspaceContains:**/*.master",
+    "workspaceContains:**/*.asax",
+    "workspaceContains:**/Web.config"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "aspx",
+        "aliases": ["ASP.NET Web Forms", "aspx"],
+        "extensions": [".aspx", ".ascx", ".master", ".asax"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aspxLint.scanWorkspace",
+        "title": "aspx-lint: Scan workspace",
+        "category": "aspx-lint"
+      },
+      {
+        "command": "aspxLint.fixCurrent",
+        "title": "aspx-lint: Fix current file (apply all auto-fixes)",
+        "category": "aspx-lint"
+      },
+      {
+        "command": "aspxLint.showOutput",
+        "title": "aspx-lint: Show output",
+        "category": "aspx-lint"
+      }
+    ],
+    "configuration": {
+      "title": "aspx-lint",
+      "properties": {
+        "aspxLint.path": {
+          "type": "string",
+          "default": "aspx-lint",
+          "description": "Path to the aspx-lint binary. By default, looks for it in PATH (assumes you ran `dotnet tool install -g aspx-lint`)."
+        },
+        "aspxLint.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run aspx-lint on file save."
+        },
+        "aspxLint.lintOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run aspx-lint as you type (debounced 500ms). Disabled by default — runs a process per change."
+        },
+        "aspxLint.severityLevel": {
+          "type": "string",
+          "enum": ["error", "warning", "info"],
+          "default": "info",
+          "description": "Minimum severity level to display. 'info' shows everything, 'error' shows only blocking issues."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}

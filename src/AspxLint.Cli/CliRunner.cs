@@ -38,6 +38,7 @@ public static class CliRunner
             {
                 "scan"        => await ScanAsync(args[1..], stdout, stderr),
                 "fix"         => await FixAsync(args[1..], stdout, stderr),
+                "analyze"     => await AnalyzeAsync(args[1..], stdout, stderr),
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
                 "watch"       => await WatchAsync(args[1..], stdout, stderr),
                 "init"        => await InitAsync(args[1..], stdout, stderr),
@@ -282,6 +283,7 @@ public static class CliRunner
         o.WriteLine("aspx-lint — analyseur de fichiers ASP.NET Web Forms");
         o.WriteLine();
         o.WriteLine("Usage:");
+        o.WriteLine("  aspx-lint analyze --ext <ext> (--stdin | <file>)  [JSON, pour IDE / outils]");
         o.WriteLine("  aspx-lint scan <path> [--json | --sarif | --junit | --codeclimate | --tap]");
         o.WriteLine("                       [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
@@ -765,5 +767,118 @@ public static class CliRunner
         TextFormatter.Write(filtered, totalIssues, stdout, SupportsColor(stdout));
 
         return totalIssues > 0 ? ExitIssuesFound : ExitOk;
+    }
+
+    /// <summary>
+    /// Analyse un fichier unique sans toucher au disque. Lit le contenu depuis
+    /// stdin (--stdin) ou depuis un path passe en argument. Renvoie toujours
+    /// du JSON sur stdout : { "issues": [...] }. Concu pour les integrations
+    /// IDE (VSCode, Visual Studio, ...) qui veulent analyser le buffer en
+    /// cours sans avoir a sauver d'abord.
+    ///
+    /// Usage :
+    ///   aspx-lint analyze --ext aspx --stdin            (lit stdin)
+    ///   aspx-lint analyze --ext aspx file.aspx          (lit le fichier)
+    /// </summary>
+    private static async Task<int> AnalyzeAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        string? path = null;
+        string ext = "aspx";
+        bool useStdin = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--stdin":
+                    useStdin = true;
+                    break;
+                case "--ext" when i + 1 < args.Length:
+                    ext = args[++i].TrimStart('.').ToLowerInvariant();
+                    break;
+                default:
+                    if (args[i].StartsWith("--"))
+                    {
+                        stderr.WriteLine($"Argument inconnu : {args[i]}");
+                        return ExitIssuesFound;
+                    }
+                    if (path != null)
+                    {
+                        stderr.WriteLine("Un seul path attendu.");
+                        return ExitIssuesFound;
+                    }
+                    path = args[i];
+                    break;
+            }
+        }
+
+        if (!useStdin && path == null)
+        {
+            stderr.WriteLine("Usage: aspx-lint analyze --ext <ext> (--stdin | <path>)");
+            return ExitIssuesFound;
+        }
+
+        string content;
+        string virtualPath;
+        if (useStdin)
+        {
+            using var sr = new StreamReader(Console.OpenStandardInput(), System.Text.Encoding.UTF8);
+            content = await sr.ReadToEndAsync();
+            virtualPath = $"stdin.{ext}";
+        }
+        else
+        {
+            if (!File.Exists(path))
+            {
+                stderr.WriteLine($"Fichier introuvable : {path}");
+                return ExitError;
+            }
+            // Lecture BOM-aware (cf. ProjectScanner.AnalyzeOne).
+            var bytes = await File.ReadAllBytesAsync(path);
+            var hasBom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            content = hasBom
+                ? "﻿" + System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3)
+                : System.Text.Encoding.UTF8.GetString(bytes);
+            virtualPath = path;
+            if (string.IsNullOrEmpty(ext) || ext == "aspx")
+            {
+                // Devine l'ext depuis le path si pas forcee.
+                var realExt = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+                if (!string.IsNullOrEmpty(realExt)) ext = realExt;
+            }
+        }
+
+        // Charge la config depuis le repertoire courant (ou parents) — utile
+        // pour respecter les overrides de severite et les ignores quand l'ext
+        // est appelee depuis un VSCode dans un projet aspx-lint configure.
+        var workDir = Directory.GetCurrentDirectory();
+        var config = AspxLintConfig.LoadFromOrAbove(workDir);
+        var rules = config.ResolveRules(RuleRegistry.All);
+
+        var issues = Analyzer.Analyze(virtualPath, content, rules, config);
+
+        // Output : JSON simple, compatible JsonFormatter. Pas de path inutile
+        // car l'IDE connait deja le path qu'il a passe.
+        var payload = new
+        {
+            ext,
+            issues = issues.Select(i => new
+            {
+                ruleId = i.RuleId,
+                ruleName = i.RuleName,
+                severity = i.Severity.ToString().ToLowerInvariant(),
+                line = i.Line,
+                col = i.Col,
+                snippet = i.Snippet,
+                hint = i.Hint
+            }).ToList()
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = false
+        });
+        stdout.WriteLine(json);
+
+        return issues.Count > 0 ? ExitIssuesFound : ExitOk;
     }
 }

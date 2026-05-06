@@ -15,11 +15,12 @@ handlers JS inline). Scan parallèle (~0.7s sur 350 fichiers), config par
 projet (`.aspxlintrc.json`), disable inline par commentaire, watch mode,
 hook pre-commit, intégration GitHub Actions avec annotations PR.
 
-Trois manières de l'utiliser :
+Quatre manières de l'utiliser :
 
 | Forme | Pour qui | Install |
 |---|---|---|
 | **CLI** `aspx-lint` | CI, scripts, lint local | `dotnet tool install -g aspx-lint` |
+| **Extension VS Code** | Diagnostics inline pendant que tu codes | Marketplace : `aspx-lint` |
 | **Dashboard Web** | Inspection ponctuelle, mobile, équipe | Servie par `AspxLint.Server` (`/`) |
 | **App desktop** | Pairing tél / desktop, tray Windows | `dotnet run --project src/AspxLint.Desktop` |
 
