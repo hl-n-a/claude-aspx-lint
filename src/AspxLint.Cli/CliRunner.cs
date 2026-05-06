@@ -41,6 +41,7 @@ public static class CliRunner
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
                 "watch"       => await WatchAsync(args[1..], stdout, stderr),
                 "init"        => await InitAsync(args[1..], stdout, stderr),
+                "benchmark"   => await BenchmarkAsync(args[1..], stdout, stderr),
                 _             => UnknownCommand(args[0], stderr),
             };
         }
@@ -88,6 +89,7 @@ public static class CliRunner
         Severity? minSev = null;
         bool quiet = false;
         bool noColor = false;
+        string? lang = null;
 
         for (int i = 1; i < args.Length; i++)
         {
@@ -97,6 +99,14 @@ public static class CliRunner
                 case "--sarif": format = "sarif"; break;
                 case "--quiet": case "-q": quiet = true; break;
                 case "--no-color": noColor = true; break;
+                case "--lang" when i + 1 < args.Length:
+                    lang = args[++i];
+                    if (!Translations.AvailableLocales.Any(l => l.Equals(lang, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        stderr.WriteLine($"--lang doit etre l'une de : {string.Join(", ", Translations.AvailableLocales)}");
+                        return ExitIssuesFound;
+                    }
+                    break;
                 case "--severity" when i + 1 < args.Length:
                     if (!Enum.TryParse<Severity>(args[++i], ignoreCase: true, out var s))
                     {
@@ -120,7 +130,24 @@ public static class CliRunner
         var config = AspxLintConfig.LoadFromOrAbove(path);
         // Scan parallele : sur un projet de 300+ fichiers, divise le temps par
         // ~le nombre de coeurs. L'ordre est preserve (tri alphabetique sur le path).
-        var scanned = ProjectScanner.ScanParallel(path, RuleRegistry.All, config: config).ToList();
+        var rules = config.ResolveRules(RuleRegistry.All);
+        var scanned = ProjectScanner.ScanParallel(path, rules, config: config).ToList();
+        // Si --lang non-default, on traduit le nom de regle dans les issues
+        // (le hint, lui, est genere par la regle et reste en langue source).
+        if (!string.IsNullOrEmpty(lang) && !lang.Equals(Translations.DefaultLocale, StringComparison.OrdinalIgnoreCase))
+        {
+            scanned = scanned.Select(f => f with
+            {
+                Issues = f.Issues.Select(i =>
+                {
+                    var rule = rules.FirstOrDefault(r => r.Id == i.RuleId);
+                    if (rule == null) return i;
+                    var (name, _) = Translations.Resolve(rule, lang);
+                    return i with { RuleName = name };
+                }).ToList()
+            }).ToList();
+        }
+
         var filtered = minSev is null
             ? scanned
             : scanned.Select(f => f with { Issues = f.Issues.Where(i => (int)i.Severity <= (int)minSev).ToList() })
@@ -135,7 +162,7 @@ public static class CliRunner
                 await JsonFormatter.WriteAsync(filtered, totalIssues, stdout);
                 break;
             case "sarif":
-                await SarifFormatter.WriteAsync(filtered, RuleRegistry.All, stdout);
+                await SarifFormatter.WriteAsync(filtered, rules, stdout);
                 break;
             default:
                 bool useColor = !noColor && SupportsColor(stdout);
@@ -243,11 +270,12 @@ public static class CliRunner
         o.WriteLine("aspx-lint — analyseur de fichiers ASP.NET Web Forms");
         o.WriteLine();
         o.WriteLine("Usage:");
-        o.WriteLine("  aspx-lint scan <path> [--json | --sarif] [--severity error|warning|info] [--quiet] [--no-color]");
+        o.WriteLine("  aspx-lint scan <path> [--json | --sarif] [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
         o.WriteLine("  aspx-lint watch <path> [--severity error|warning|info]");
         o.WriteLine("  aspx-lint init [--with-hook]");
         o.WriteLine("  aspx-lint pre-commit [--severity error|warning|info]");
+        o.WriteLine("  aspx-lint benchmark <path> [--runs <N>]");
         o.WriteLine("  aspx-lint --version | --help");
         o.WriteLine();
         o.WriteLine("watch       : re-lint a chaque modification de fichier (Ctrl+C pour arreter).");
@@ -492,6 +520,112 @@ public static class CliRunner
         // mais avec ReadCommentHandling.Skip ils sont ignores. On l'active dans
         // AspxLintConfig.LoadFromOrAbove pour que le template fonctionne tel quel.
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Benchmark : mesure le temps de scan total ET le temps par regle pour
+    /// identifier les goulots. Lance N passes (3 par defaut), garde la mediane
+    /// pour eviter le bruit JIT/cache. Affiche un tableau trie par cout.
+    /// </summary>
+    private static async Task<int> BenchmarkAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        if (args.Length == 0)
+        {
+            stderr.WriteLine("Usage: aspx-lint benchmark <path> [--runs <N>]");
+            return ExitIssuesFound;
+        }
+        var path = args[0];
+        int runs = 3;
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--runs" && i + 1 < args.Length && int.TryParse(args[++i], out var n) && n > 0)
+                runs = Math.Min(n, 50);
+            else
+            {
+                stderr.WriteLine($"Argument inconnu : {args[i]}");
+                return ExitIssuesFound;
+            }
+        }
+        if (!Directory.Exists(path))
+        {
+            stderr.WriteLine($"Dossier introuvable : {path}");
+            return ExitError;
+        }
+
+        var config = AspxLintConfig.LoadFromOrAbove(path);
+        var rules = config.ResolveRules(RuleRegistry.All);
+
+        // Warmup : 1 passe non comptee pour eviter le coup de chauffe JIT.
+        stdout.Write("Warmup… ");
+        var sw0 = System.Diagnostics.Stopwatch.StartNew();
+        var warm = ProjectScanner.ScanParallel(path, rules, config: config);
+        sw0.Stop();
+        stdout.WriteLine($"{warm.Count} fichier(s) en {sw0.ElapsedMilliseconds} ms.");
+
+        // Mesures globales : N runs.
+        stdout.WriteLine();
+        stdout.Write("Scan total : ");
+        var totals = new List<long>();
+        for (int r = 0; r < runs; r++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var _ = ProjectScanner.ScanParallel(path, rules, config: config);
+            sw.Stop();
+            totals.Add(sw.ElapsedMilliseconds);
+            stdout.Write($"{sw.ElapsedMilliseconds}ms ");
+        }
+        stdout.WriteLine();
+        var med = Median(totals);
+        var min = totals.Min();
+        var max = totals.Max();
+        stdout.WriteLine($"  median {med}ms, min {min}ms, max {max}ms ({runs} runs)");
+        stdout.WriteLine();
+
+        // Per-rule : on benchmark Detect en charge sequentielle pour avoir
+        // une mesure stable par regle (sans contention thread).
+        var perRule = new Dictionary<string, long>();
+        var totalIssuesPerRule = new Dictionary<string, int>();
+        var fileCount = warm.Count;
+
+        foreach (var rule in rules)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int hits = 0;
+            foreach (var f in warm)
+            {
+                var ext = Path.GetExtension(f.AbsolutePath).TrimStart('.').ToLowerInvariant();
+                var ctx = new RuleContext(ext, f.AbsolutePath);
+                var lines = f.Content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                hits += rule.Detect(f.Content, lines, ctx).Count();
+            }
+            sw.Stop();
+            perRule[rule.Id] = sw.ElapsedMilliseconds;
+            totalIssuesPerRule[rule.Id] = hits;
+        }
+
+        stdout.WriteLine($"Per-rule (sequential, sur {fileCount} fichier(s)) :");
+        stdout.WriteLine();
+        stdout.WriteLine("  Rule         Time     Per-file  Issues");
+        stdout.WriteLine("  ----------   ------   --------  ------");
+        foreach (var (id, ms) in perRule.OrderByDescending(kv => kv.Value))
+        {
+            var perFile = fileCount > 0 ? (double)ms / fileCount : 0;
+            var issues = totalIssuesPerRule[id];
+            stdout.WriteLine($"  {id,-12} {ms,4} ms  {perFile,6:F2} ms  {issues,5}");
+        }
+        stdout.WriteLine();
+        stdout.WriteLine($"Total per-rule sum : {perRule.Values.Sum()} ms");
+
+        await Task.CompletedTask;
+        return ExitOk;
+    }
+
+    private static long Median(List<long> values)
+    {
+        var sorted = values.OrderBy(x => x).ToList();
+        int n = sorted.Count;
+        if (n == 0) return 0;
+        return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
     }
 
     /// <summary>

@@ -935,6 +935,41 @@
     font-weight: 600;
   }
 
+  /* Mode edition in-place */
+  .edit-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 18px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .edit-bar-hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .edit-bar-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .code-edit-textarea {
+    width: 100%;
+    height: calc(100% - 36px);
+    border: none;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    padding: 16px 18px;
+    resize: none;
+    box-sizing: border-box;
+    outline: none;
+    tab-size: 4;
+  }
+  .code-edit-textarea:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+
   /* Split view : code a gauche, diff a droite, partage du scroll vertical */
   .split-container {
     display: grid;

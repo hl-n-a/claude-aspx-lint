@@ -19,10 +19,13 @@ public sealed class DashboardWindow : Window
 {
     private readonly WebView2 _webView;
     private readonly string _url;
+    private readonly string? _allowedRoot;
+    private FileSystemWatcher? _watcher;
 
-    public DashboardWindow(StartedServer server)
+    public DashboardWindow(StartedServer server, string? allowedRoot = null)
     {
         _url = server.LocalUrl;
+        _allowedRoot = allowedRoot;
         Title = $"ASPX·LINT  •  build {server.BuildId}";
         Width = 1400;
         Height = 900;
@@ -35,6 +38,7 @@ public sealed class DashboardWindow : Window
         Content = _webView;
 
         Loaded += async (_, _) => await InitializeAsync();
+        Closed += (_, _) => _watcher?.Dispose();
     }
 
     private async System.Threading.Tasks.Task InitializeAsync()
@@ -69,6 +73,14 @@ public sealed class DashboardWindow : Window
             };
 
             _webView.CoreWebView2.Navigate(_url);
+
+            // Si on a un AllowedRoot, on lance un FileSystemWatcher dessus pour
+            // notifier la dashboard quand un fichier change sur disque (utile
+            // quand l'utilisateur edite en parallele dans VS / un autre editeur).
+            if (!string.IsNullOrEmpty(_allowedRoot) && Directory.Exists(_allowedRoot))
+            {
+                StartFileWatcher(_allowedRoot);
+            }
         }
         catch (Exception ex)
         {
@@ -83,6 +95,60 @@ public sealed class DashboardWindow : Window
                 MessageBoxImage.Error);
             Close();
         }
+    }
+
+    /// <summary>
+    /// Surveille les fichiers ASPX/ASCX/MASTER/ASAX sous AllowedRoot. Quand
+    /// un changement disque est detecte, on poste un message JSON a la page
+    /// JS via window.chrome.webview qui peut alors rafraichir le fichier
+    /// concerne. Coalesced 300 ms pour eviter les bursts d'events.
+    /// </summary>
+    private void StartFileWatcher(string root)
+    {
+        _watcher = new FileSystemWatcher(root)
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+        _watcher.Filters.Add("*.aspx");
+        _watcher.Filters.Add("*.ascx");
+        _watcher.Filters.Add("*.master");
+        _watcher.Filters.Add("*.asax");
+
+        // Debounce simple : on accumule les events et on flush apres 300 ms
+        // d'inactivite, pour absorber les bursts (size + lastWrite + ...).
+        var pending = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
+        var debounce = new System.Threading.Timer(_ =>
+        {
+            var paths = pending.Keys.ToArray();
+            pending.Clear();
+            if (paths.Length == 0) return;
+            Dispatcher.Invoke(() => PostFileChanges(paths));
+        });
+
+        void Bump(string path)
+        {
+            pending[path] = 0;
+            debounce.Change(300, System.Threading.Timeout.Infinite);
+        }
+
+        _watcher.Changed += (_, e) => Bump(e.FullPath);
+        _watcher.Created += (_, e) => Bump(e.FullPath);
+        _watcher.Deleted += (_, e) => Bump(e.FullPath);
+        _watcher.Renamed += (_, e) => { Bump(e.OldFullPath); Bump(e.FullPath); };
+    }
+
+    private void PostFileChanges(string[] paths)
+    {
+        if (_webView.CoreWebView2 == null) return;
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            kind = "fileChanges",
+            paths
+        });
+        try { _webView.CoreWebView2.PostWebMessageAsString(json); }
+        catch { /* WebView pas encore pret ou ferme */ }
     }
 
     /// <summary>

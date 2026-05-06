@@ -58,7 +58,10 @@ public partial class App : Application
         BuildTray(_server);
 
         // Fenetre principale : WebView2 embarque, pas d'URL bar, pas de devtools.
-        _dashboardWindow = new DashboardWindow(_server);
+        // Allowed root = pas pose ici (mode desktop perso), mais l'utilisateur peut
+        // poser ASPXLINT_ALLOWED_ROOT pour activer le file watcher sur ce dossier.
+        var allowedRoot = Environment.GetEnvironmentVariable("ASPXLINT_ALLOWED_ROOT");
+        _dashboardWindow = new DashboardWindow(_server, allowedRoot);
         MainWindow = _dashboardWindow;
         _dashboardWindow.Closed += (_, _) => Shutdown();   // X ferme l'app + tray + serveur
         _dashboardWindow.Show();

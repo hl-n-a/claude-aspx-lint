@@ -52,6 +52,7 @@ const state = {
   selectedFileIds: new Set(),  // multi-selection (pour les actions en lot)
   fileSearch: '',              // texte du filtre de recherche dans la sidebar
   splitView: false,            // vue code+diff cote a cote au lieu du toggle
+  editMode: false,             // edition in-place dans le code area
   theme: 'default'
 };
 
@@ -723,6 +724,7 @@ function renderCode() {
     $('btnFixAll').disabled = true;
     $('btnFixAndSave').disabled = true;
     $('btnVerify').disabled = true;
+    $('btnEdit').disabled = true;
     $('btnDiff').disabled = true;
     $('btnSplit').disabled = true;
     $('btnDownload').disabled = true;
@@ -740,6 +742,8 @@ function renderCode() {
   $('btnFixAndSave').disabled = !file.serverPath
                               || (!file.issues.some(i => i.fixable) && !modified);
   $('btnVerify').disabled = false;
+  $('btnEdit').disabled = false;
+  $('btnEdit').classList.toggle('toggle-on', state.editMode);
   $('btnDiff').disabled = !modified;
   // Le bouton Split reste actif meme sans modif : le pane droit affichera
   // "Aucune modification" et l'utilisateur peut basculer pour preparer la vue.
@@ -759,6 +763,11 @@ function renderCode() {
 
   if (state.splitView) {
     renderSplit(file);
+    return;
+  }
+
+  if (state.editMode) {
+    renderEditMode(file);
     return;
   }
 
@@ -792,6 +801,28 @@ function renderCode() {
   html += '</div>';
   area.innerHTML = html;
   attachIssueScrollSync();
+}
+
+/**
+ * Mode edition : un textarea pleine zone qui contient le code raw du fichier.
+ * Pas de syntax highlighting (eviterait les surprises de re-parsing en plein
+ * milieu d'une frappe). Validation au blur, Ctrl+Entrée ou bouton ✓.
+ */
+function renderEditMode(file) {
+  const area = $('codeArea');
+  area.innerHTML = `
+    <div class="edit-bar">
+      <span class="edit-bar-hint">Édition in-place — Ctrl+Entrée pour valider, Échap pour annuler</span>
+      <div class="edit-bar-actions">
+        <button class="btn small ghost" onclick="cancelEdit()">✕ Annuler</button>
+        <button class="btn small primary" onclick="commitEdit()">✓ Valider</button>
+      </div>
+    </div>
+    <textarea id="codeEditTextarea" class="code-edit-textarea" spellcheck="false" autocomplete="off"
+      onblur="commitEdit()"
+      onkeydown="if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); } else if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); commitEdit(); }"
+    >${escapeHtml(file.current)}</textarea>
+  `;
 }
 
 /**
@@ -1152,6 +1183,53 @@ function toggleDiff() {
 function toggleSplitView() {
   state.splitView = !state.splitView;
   state.viewMode = 'code';   // base : on affiche le code, le split ajoute le diff a droite
+  renderCode();
+}
+
+/* ============================================================
+   EDIT-IN-PLACE — toggle entre code coloré (lecture) et textarea (édition)
+   ============================================================
+   Activation : bouton ✎ Éditer ou Ctrl+E. Validation : bouton ✓ Valider,
+   Ctrl+Entrée, ou click hors du textarea (blur). On met `file.current` a jour,
+   on relance l'analyse et on revient en mode lecture.
+   ============================================================ */
+
+function toggleEdit() {
+  const file = currentFile();
+  if (!file) return;
+  state.editMode = !state.editMode;
+  state.viewMode = 'code';
+  state.splitView = false;
+  renderCode();
+  if (state.editMode) {
+    setTimeout(() => {
+      const ta = $('codeEditTextarea');
+      if (ta) ta.focus();
+    }, 50);
+  }
+}
+
+async function commitEdit() {
+  const file = currentFile();
+  if (!file || !state.editMode) return;
+  const ta = $('codeEditTextarea');
+  if (!ta) return;
+  const newContent = ta.value;
+  if (newContent === file.current) {
+    state.editMode = false;
+    renderCode();
+    return;
+  }
+  file.current = newContent;
+  state.editMode = false;
+  await runAnalysis(file);
+  showToast('Modifications appliquées et ré-analysées.', 'success');
+  setVerifyStatus('idle', '⊙ revérification disponible');
+  renderAll();
+}
+
+function cancelEdit() {
+  state.editMode = false;
   renderCode();
 }
 
@@ -2628,6 +2706,10 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
     e.preventDefault(); toggleDiff(); return;
   }
+  // Ctrl+E — toggle edit
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+    e.preventDefault(); toggleEdit(); return;
+  }
   // Fleches haut/bas : naviguer entre fichiers
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
@@ -2655,6 +2737,52 @@ function navigateFile(direction) {
 }
 
 initDragDrop();
+
+/* ============================================================
+   WEBVIEW2 BRIDGE — Desktop file watcher
+   ============================================================
+   Quand l'app Desktop tourne avec ASPXLINT_ALLOWED_ROOT, le watcher C#
+   poste un message {kind:"fileChanges", paths:[...]} sur chaque change
+   disque. On rafraichit le fichier concerne via /api/scan ou un read direct.
+   ============================================================ */
+if (window.chrome && window.chrome.webview && typeof window.chrome.webview.addEventListener === 'function') {
+  window.chrome.webview.addEventListener('message', (e) => {
+    let msg;
+    try { msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; }
+    catch { return; }
+    if (msg && msg.kind === 'fileChanges' && Array.isArray(msg.paths)) {
+      onDesktopFileChanges(msg.paths);
+    }
+  });
+}
+
+async function onDesktopFileChanges(paths) {
+  // On match les paths recus avec les fichiers actuellement charges via
+  // serverPath, et on relit chacun via /api/read. Affiche un toast.
+  let touched = 0;
+  for (const p of paths) {
+    const file = state.files.find(f => f.serverPath && f.serverPath.toLowerCase() === p.toLowerCase());
+    if (!file) continue;
+    try {
+      const r = await fetch('/api/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file.serverPath })
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      file.original = data.content;
+      file.current = data.content;
+      file.history = [];
+      await runAnalysis(file);
+      touched++;
+    } catch { /* ignore */ }
+  }
+  if (touched > 0) {
+    showToast(`${touched} fichier(s) rechargé(s) (modification disque détectée).`, 'success');
+    renderAll();
+  }
+}
 
 // Bootstrap : on load les regles depuis /api/rules, puis on rend l'UI.
 // La dashboard tourne toujours derriere AspxLint.Server (file:// bloque tout

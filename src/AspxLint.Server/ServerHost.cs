@@ -39,6 +39,7 @@ public sealed record StartedServer(
 public sealed record ScanRequest(string Path);
 public sealed record SaveRequest(string Path, string Content);
 public sealed record RestoreRequest(string Path);
+public sealed record ReadRequest(string Path);
 public sealed record AnalyzeRequest(string Content, string Ext);
 public sealed record FixRequest(string Content, string Ext, string RuleId);
 public sealed record FixOneRequest(string Content, string Ext, string RuleId, int Line);
@@ -188,14 +189,18 @@ public static class ServerHost
             await ctx.Response.WriteAsync(html);
         });
 
-        app.MapGet("/api/rules", () => Results.Ok(
-            RuleRegistry.All.Select(r => new
+        app.MapGet("/api/rules", (string? lang) => Results.Ok(
+            RuleRegistry.All.Select(r =>
             {
-                id = r.Id,
-                name = r.Name,
-                severity = r.Severity.ToString().ToLowerInvariant(),
-                desc = r.Description,
-                hasFix = r.HasFix
+                var (name, desc) = Translations.Resolve(r, lang);
+                return new
+                {
+                    id = r.Id,
+                    name,
+                    severity = r.Severity.ToString().ToLowerInvariant(),
+                    desc,
+                    hasFix = r.HasFix
+                };
             })
         ));
 
@@ -626,6 +631,49 @@ public static class ServerHost
             catch (Exception ex)
             {
                 session.Log("ERROR", $"save crashed: {ex}");
+                return Results.Problem(ex.Message);
+            }
+        });
+
+        // Lit un fichier depuis le disque (pour rafraichir la dashboard apres un
+        // changement detecte par le file watcher Desktop). Renvoie content + issues.
+        app.MapPost("/api/read", (ReadRequest req) =>
+        {
+            string full;
+            try { full = Path.GetFullPath(req.Path); }
+            catch (Exception ex) { return Results.BadRequest(new { error = $"Chemin invalide : {ex.Message}" }); }
+
+            if (!session.IsUnderAllowedRoot(full))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            if (!File.Exists(full))
+                return Results.NotFound(new { error = "Fichier introuvable." });
+
+            try
+            {
+                var bytes = File.ReadAllBytes(full);
+                var hasBom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+                var content = hasBom
+                    ? "﻿" + Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3)
+                    : Encoding.UTF8.GetString(bytes);
+
+                var ext = Path.GetExtension(full).TrimStart('.').ToLowerInvariant();
+                var issues = Analyzer.Analyze(full, content, RuleRegistry.All)
+                    .Select(i => new
+                    {
+                        ruleId = i.RuleId,
+                        ruleName = i.RuleName,
+                        severity = i.Severity.ToString().ToLowerInvariant(),
+                        line = i.Line,
+                        col = i.Col,
+                        snippet = i.Snippet,
+                        hint = i.Hint
+                    });
+
+                return Results.Ok(new { path = full, content, issues });
+            }
+            catch (Exception ex)
+            {
+                session.Log("ERROR", $"read crashed: {ex}");
                 return Results.Problem(ex.Message);
             }
         });
