@@ -935,7 +935,10 @@
     font-weight: 600;
   }
 
-  /* Mode edition in-place */
+  /* Mode edition in-place — overlay textarea + pre. Le pre montre le code
+     coloré (highlight live), le textarea recoit la frappe avec un caret visible
+     mais texte transparent. Les deux DOIVENT partager font/padding/line-height
+     pour que le caret tombe pile sur les caracteres. */
   .edit-bar {
     display: flex;
     align-items: center;
@@ -953,22 +956,54 @@
     display: flex;
     gap: 6px;
   }
-  .code-edit-textarea {
-    width: 100%;
+  .code-edit-container {
+    position: relative;
     height: calc(100% - 36px);
-    border: none;
     background: var(--bg);
-    color: var(--text);
+  }
+  .code-edit-highlight,
+  .code-edit-textarea {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 16px 18px;
+    border: none;
+    box-sizing: border-box;
     font-family: var(--mono);
     font-size: 12.5px;
     line-height: 1.6;
-    padding: 16px 18px;
-    resize: none;
-    box-sizing: border-box;
-    outline: none;
     tab-size: 4;
+    -moz-tab-size: 4;
+    white-space: pre;
+    word-wrap: normal;
+    overflow: auto;
   }
-  .code-edit-textarea:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .code-edit-highlight {
+    color: var(--text);
+    pointer-events: none;       /* clicks/wheel passent au textarea */
+    background: transparent;
+  }
+  .code-edit-textarea {
+    color: transparent;          /* le texte visible vient du <pre> en dessous */
+    caret-color: var(--text);    /* mais on garde le caret visible */
+    background: transparent;
+    resize: none;
+    outline: none;
+  }
+  /* La selection est dessinee par le textarea natif. On la rend semi-transparente
+     pour que les couleurs du pre transparaissent sous la selection. */
+  .code-edit-textarea::selection {
+    background: rgba(212, 255, 58, 0.3);
+    color: transparent;
+  }
+  .code-edit-textarea::-moz-selection {
+    background: rgba(212, 255, 58, 0.3);
+    color: transparent;
+  }
+  .code-edit-textarea:focus { outline: none; }
+  .code-edit-container:focus-within {
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
 
   /* Split view : code a gauche, diff a droite, partage du scroll vertical */
   .split-container {

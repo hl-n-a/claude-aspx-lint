@@ -804,25 +804,102 @@ function renderCode() {
 }
 
 /**
- * Mode edition : un textarea pleine zone qui contient le code raw du fichier.
- * Pas de syntax highlighting (eviterait les surprises de re-parsing en plein
- * milieu d'une frappe). Validation au blur, Ctrl+Entrée ou bouton ✓.
+ * Mode edition : technique d'overlay textarea + pre.
+ *   - <pre> en background avec le contenu tokenize (couleurs visibles)
+ *   - <textarea> superpose, texte transparent + caret colore (frappe + selection)
+ * Les deux partagent exactement la meme typo / padding / line-height pour que
+ * le caret tombe pile sur les caracteres affiches. Chaque keystroke re-tokenize
+ * juste la version <pre> (notre highlightLine est rapide). Validation au blur
+ * (sauf si --no-blur-commit), Ctrl+Entree ou bouton ✓. Tab insere 4 espaces.
  */
 function renderEditMode(file) {
   const area = $('codeArea');
+  const tokenized = tokenizeForEditor(file.current);
   area.innerHTML = `
     <div class="edit-bar">
-      <span class="edit-bar-hint">Édition in-place — Ctrl+Entrée pour valider, Échap pour annuler</span>
+      <span class="edit-bar-hint">Édition in-place avec syntax highlighting — Ctrl+Entrée pour valider, Échap pour annuler</span>
       <div class="edit-bar-actions">
         <button class="btn small ghost" onclick="cancelEdit()">✕ Annuler</button>
         <button class="btn small primary" onclick="commitEdit()">✓ Valider</button>
       </div>
     </div>
-    <textarea id="codeEditTextarea" class="code-edit-textarea" spellcheck="false" autocomplete="off"
-      onblur="commitEdit()"
-      onkeydown="if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); } else if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); commitEdit(); }"
-    >${escapeHtml(file.current)}</textarea>
+    <div class="code-edit-container">
+      <pre id="codeEditHighlight" class="code-edit-highlight" aria-hidden="true">${tokenized}</pre>
+      <textarea id="codeEditTextarea" class="code-edit-textarea"
+        spellcheck="false" autocomplete="off" autocapitalize="off"
+        oninput="onEditInput()"
+        onscroll="syncEditScroll()"
+        onblur="onEditBlur(event)"
+        onkeydown="onEditKey(event)">${escapeHtml(file.current)}</textarea>
+    </div>
   `;
+}
+
+/** Re-tokenize tout le contenu pour le pre d'arrière-plan. */
+function tokenizeForEditor(content) {
+  // On garde le \n final pour que la hauteur du <pre> matche celle du textarea
+  // (sinon la derniere ligne vide n'est pas comptee).
+  return content.split(/\r?\n/).map(l => highlightLine(l) || ' ').join('\n') + '\n';
+}
+
+function onEditInput() {
+  const ta = $('codeEditTextarea');
+  const pre = $('codeEditHighlight');
+  if (!ta || !pre) return;
+  pre.innerHTML = tokenizeForEditor(ta.value);
+  // Sync scroll au cas ou la frappe a change la hauteur (insertion d'une ligne).
+  syncEditScroll();
+}
+
+/**
+ * Auto-commit au blur (l'utilisateur clique ailleurs). On verifie que le focus
+ * ne va pas vers les boutons Valider/Annuler — sinon on laisse leur handler
+ * decider du sort des modifs.
+ */
+function onEditBlur(e) {
+  // relatedTarget = element qui prend le focus. Si c'est un bouton de notre
+  // bar d'edition, on ne fait rien : leur onclick gere deja commit/cancel.
+  const next = e.relatedTarget;
+  if (next && next.closest && next.closest('.edit-bar-actions')) return;
+  // Sinon (clic dans la sidebar, le file tree, etc.) on commit silencieusement.
+  commitEdit();
+}
+
+function syncEditScroll() {
+  const ta = $('codeEditTextarea');
+  const pre = $('codeEditHighlight');
+  if (!ta || !pre) return;
+  pre.scrollTop = ta.scrollTop;
+  pre.scrollLeft = ta.scrollLeft;
+}
+
+function onEditKey(e) {
+  if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); return; }
+  if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); commitEdit(); return; }
+  // Tab : insere 4 espaces au lieu de changer le focus.
+  if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault();
+    const ta = e.target;
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + '    ' + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + 4;
+    onEditInput();
+    return;
+  }
+  // Shift+Tab : dedent (4 espaces si presents en tete de ligne courante).
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    const ta = e.target;
+    const start = ta.selectionStart;
+    const lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
+    const lineHead = ta.value.slice(lineStart, lineStart + 4);
+    if (lineHead === '    ') {
+      ta.value = ta.value.slice(0, lineStart) + ta.value.slice(lineStart + 4);
+      ta.selectionStart = ta.selectionEnd = Math.max(lineStart, start - 4);
+      onEditInput();
+    }
+    return;
+  }
 }
 
 /**
