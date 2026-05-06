@@ -73,6 +73,18 @@ public static class Translations
                               "An ASPX page using server controls needs an enclosing <form runat=\"server\">. Without it, ViewState and postbacks don't work."),
             ["SM-001"]     = ("Multiple <asp:ScriptManager>",
                               "Only one <asp:ScriptManager> can live per page. ScriptManagerProxy handles content pages."),
+            ["CFG-001"]    = ("compilation debug=\"true\" in Web.config",
+                              "Debug mode disables code optimization, loads PDBs, extends timeouts, and exposes stack traces. Should be false in production (use Web.Debug.config for local debugging)."),
+            ["CFG-002"]    = ("customErrors mode=\"Off\" leaks stack traces",
+                              "With customErrors mode=\"Off\", unhandled exceptions show full stack traces, disk paths, and sometimes connection strings to the visitor. Use \"RemoteOnly\" (default) or \"On\"."),
+            ["CFG-003"]    = ("trace enabled=\"true\" in Web.config",
+                              "trace enabled=\"true\" exposes Trace.axd with session/cookie/server-variable data. Disable in production unless explicitly protected by localOnly + network restrictions."),
+            ["CFG-004"]    = ("httpCookies missing httpOnlyCookies/requireSSL",
+                              "Protect session cookies: add httpOnlyCookies=\"true\" (blocks JS access, mitigates XSS) and requireSSL=\"true\" (forces Secure flag, mitigates MITM). Don't enable requireSSL if the site isn't served over HTTPS."),
+            ["CFG-005"]    = ("sessionState mode=\"InProc\" doesn't scale",
+                              "InProc stores sessions in IIS process memory: lost on app pool recycle, incompatible with multi-instance. For real multi-instance use StateServer or SQLServer (Redis via custom provider)."),
+            ["CFG-006"]    = ("Plaintext password in connectionString",
+                              "A connectionString containing \"password=...\" exposes credentials to anyone with repo or filesystem access. Use Integrated Security, a secret manager, or encrypt the section with aspnet_regiis -pe."),
         }
     };
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>aspx-lint — formatage / diagnostic ASP.NET Web Forms</title>
-<meta name="description" content="Linter et auto-fixer pour fichiers ASP.NET Web Forms (.aspx, .ascx, .master, .asax). 29 règles, 19 auto-fixables." />
+<meta name="description" content="Linter et auto-fixer pour fichiers ASP.NET Web Forms (.aspx, .ascx, .master, .asax). 35 règles, 19 auto-fixables." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -28,7 +28,7 @@
   <section class="hero">
     <h1><em>Une revue de code attentive</em><br/>pour ASPX, ASCX &amp; MASTER.</h1>
     <p class="lede">Linter et auto-fixer pour fichiers ASP.NET Web Forms.
-       29 règles couvrant directives de page, balises XHTML, contrôles serveur,
+       35 règles couvrant directives de page, balises XHTML, contrôles serveur,
        indentation, encodage, sécurité, accessibilité.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/hl-n-a/claude-aspx-lint">Code source</a>
@@ -38,9 +38,9 @@
 
   <section class="stats">
     <div class="stat-card">
-      <div class="stat-num" id="ruleCount">29</div>
+      <div class="stat-num" id="ruleCount">35</div>
       <div class="stat-label">règles</div>
-      <div class="stat-sub" id="autoFixCount">19 auto-fixables</div>
+      <div class="stat-sub" id="autoFixCount">22 auto-fixables</div>
     </div>
     <div class="stat-card">
       <div class="stat-num" id="coverageLines">86.6%</div>
@@ -122,6 +122,7 @@ aspx-lint watch ./MyProject</code></pre>
       <span class="rule-cat" title="DOCTYPE">DOC (1)</span>
       <span class="rule-cat" title="form runat=server">FORM (1)</span>
       <span class="rule-cat" title="ScriptManager">SM (1)</span>
+      <span class="rule-cat" title="Web.config : debug, customErrors, trace, httpCookies, sessionState, connection strings">CFG (6)</span>
     </div>
   </section>
 

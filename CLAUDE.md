@@ -20,7 +20,7 @@ serveur, aucune build step, aucune télémétrie. Garder cette propriété.
 ## Architecture du script
 
 ```
-RULES = [...]              // 29 règles, chacune { id, name, severity, desc, detect, fix? }
+RULES = [...]              // 35 règles, chacune { id, name, severity, desc, detect, fix? }
 state = { files, currentFileId, filter, viewMode, fixedCount }
 
 // Pipeline
@@ -59,7 +59,7 @@ n'échappent le HTML qu'au moment d'émettre chaque token.
 ne s'activent que pour un ext donné (DOC-001 ASPX uniquement, ASP-003
 MASTER uniquement, ASP-004 page enfant, etc.).
 
-## Inventaire des règles (23)
+## Inventaire des règles (35)
 
 | ID        | Sévérité   | Auto-fix | Description courte                                |
 |-----------|------------|----------|---------------------------------------------------|
@@ -92,8 +92,17 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | DOC-001   | warning    | ✓        | DOCTYPE manquant (ASPX standalone uniquement)      |
 | FORM-001  | error      | ✓        | `<form>` sans `runat="server"` dans ASPX           |
 | SM-001    | error      |          | Plusieurs `<asp:ScriptManager>`                    |
+| CFG-001   | warning    | ✓        | `<compilation debug="true">` en Web.config         |
+| CFG-002   | warning    | ✓        | `<customErrors mode="Off">` expose stack traces    |
+| CFG-003   | info       | ✓        | `<trace enabled="true">` expose Trace.axd          |
+| CFG-004   | warning    |          | `<httpCookies>` sans `httpOnlyCookies` / `requireSSL` |
+| CFG-005   | info       |          | `<sessionState mode="InProc">` ne scale pas         |
+| CFG-006   | warning    |          | Mot de passe en clair dans `connectionString`      |
 
-19 règles ont un auto-fix, 10 nécessitent une correction manuelle.
+22 règles ont un auto-fix, 13 nécessitent une correction manuelle.
+
+Les 6 règles `CFG-XXX` ne s'activent que sur les fichiers `.config` (typiquement
+`Web.config`). Elles ne tournent jamais sur du contenu ASPX/ASCX/MASTER.
 
 ## Configuration projet (.aspxlintrc.json)
 

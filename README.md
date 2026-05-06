@@ -8,7 +8,7 @@
 [![Coverage report](https://img.shields.io/badge/coverage-browse-d4ff3a)](https://hl-n-a.github.io/claude-aspx-lint/coverage/)
 
 Linter et auto-fixer pour fichiers **ASP.NET Web Forms** (`.aspx`, `.ascx`,
-`.master`, `.asax`). 29 règles couvrant directives de page, balises XHTML,
+`.master`, `.asax`). 35 règles couvrant directives de page, balises XHTML,
 contrôles serveur, indentation, encodage, sécurité (ViewState, tabnabbing,
 URLs locales), accessibilité (alt manquant), et code smells (style inline,
 handlers JS inline). Scan parallèle (~0.7s sur 350 fichiers), config par
@@ -148,7 +148,7 @@ dashboard, Desktop, futures extensions Chrome/VS) :
 ```
 GET  /                  → dashboard HTML (CSS/JS/partials inlinés)
 GET  /healthz           → no auth, healthcheck
-GET  /api/rules         → liste des 29 règles (id, name, severity, hasFix)
+GET  /api/rules         → liste des 35 règles (id, name, severity, hasFix)
 GET  /api/browse?path=  → liste les sous-dossiers (folder explorer dashboard)
 GET  /api/find-folder?name= → BFS pour drag-and-drop folder
 POST /api/scan          → scan récursif d'un dossier (path → issues + content)
@@ -244,7 +244,7 @@ Dans les deux cas :
 
 ---
 
-## Règles (29 au total)
+## Règles (35 au total)
 
 | ID | Catégorie | Sévérité | Auto-fix |
 |---|---|---|---|
@@ -277,8 +277,18 @@ Dans les deux cas :
 | DOC-001 | DOCTYPE manquant (ASPX standalone) | warning | ✓ |
 | FORM-001 | `<form>` sans `runat="server"` | error | ✓ |
 | SM-001 | Plusieurs `<asp:ScriptManager>` | error | — |
+| CFG-001 | `<compilation debug="true">` en Web.config | warning | ✓ |
+| CFG-002 | `<customErrors mode="Off">` expose stack traces | warning | ✓ |
+| CFG-003 | `<trace enabled="true">` expose Trace.axd | info | ✓ |
+| CFG-004 | `<httpCookies>` sans `httpOnlyCookies` / `requireSSL` | warning | — |
+| CFG-005 | `<sessionState mode="InProc">` ne scale pas | info | — |
+| CFG-006 | Mot de passe en clair dans `connectionString` | warning | — |
 
-**19 règles auto-fixables, 10 manuelles** (renommages, restructurations, jugement humain).
+**22 règles auto-fixables, 13 manuelles** (renommages, restructurations, jugement humain).
+
+Les règles `CFG-XXX` s'appliquent uniquement aux fichiers `.config` (typiquement
+`Web.config`). Le scan parcourt automatiquement `.aspx`, `.ascx`, `.master`,
+`.asax` et `.config` ; les autres extensions sont ignorées.
 
 ---
 

@@ -241,8 +241,11 @@ jobs:
           echo "  LOC=$LOC_FMT"
 
           # sed-replace les placeholders dans _site/index.html.
-          sed -i "s|>29<|>$RULE_COUNT<|g" _site/index.html
-          sed -i "s|19 auto-fixables|$AUTO_FIX_COUNT auto-fixables|g" _site/index.html
+          # Le placeholder par defaut suit la valeur courante ; le sed met a jour
+          # si jamais le code/test a divergeralent et qu'on a oublie de la
+          # bumper en meme temps.
+          sed -i "s|id=\"ruleCount\">[0-9]\+<|id=\"ruleCount\">$RULE_COUNT<|g" _site/index.html
+          sed -i "s|id=\"autoFixCount\">[0-9]\+ auto-fixables|id=\"autoFixCount\">$AUTO_FIX_COUNT auto-fixables|g" _site/index.html
           sed -i "s|>86\.6%<|>$COV_LINES<|g" _site/index.html
           sed -i "s|>77\.6%<|>$COV_BRANCH<|g" _site/index.html
           sed -i "s|430+ tests|$TEST_COUNT tests|g" _site/index.html

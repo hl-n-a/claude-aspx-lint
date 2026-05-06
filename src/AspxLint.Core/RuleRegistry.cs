@@ -60,5 +60,13 @@ public static class RuleRegistry
 
         // Script Manager
         new Sm001MultipleScriptManager(),
+
+        // Web.config — securite, perf, scalabilite
+        new Cfg001CompilationDebug(),
+        new Cfg002CustomErrorsOff(),
+        new Cfg003TraceEnabled(),
+        new Cfg004HttpCookiesNotSecure(),
+        new Cfg005SessionStateInProc(),
+        new Cfg006ConnectionStringPlaintext(),
     };
 }

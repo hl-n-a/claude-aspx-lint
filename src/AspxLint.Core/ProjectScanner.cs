@@ -12,7 +12,7 @@ public sealed record ScannedFile(
 
 public static class ProjectScanner
 {
-    public static readonly string[] DefaultExtensions = { ".aspx", ".ascx", ".master", ".asax" };
+    public static readonly string[] DefaultExtensions = { ".aspx", ".ascx", ".master", ".asax", ".config" };
 
     /// <summary>
     /// Scan classique. Streamble (yield) — pratique pour le CLI qui veut afficher

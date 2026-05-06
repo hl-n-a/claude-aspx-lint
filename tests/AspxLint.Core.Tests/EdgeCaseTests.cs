@@ -504,7 +504,7 @@ public class EdgeCaseTests
     }
 
     [Fact]
-    public void Translations_covers_all_29_rules_in_english()
+    public void Translations_covers_all_rules_in_english()
     {
         // Garde-fou : si on ajoute une regle, on doit ajouter sa traduction EN
         // sinon les utilisateurs --lang en voient un mix FR/EN.

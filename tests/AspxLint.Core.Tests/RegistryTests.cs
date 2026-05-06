@@ -13,13 +13,15 @@ public class RegistryTests
         "SEC-001", "SEC-002", "SEC-003",
         "A11Y-001",
         "STYLE-001", "SCRIPT-001",
-        "DOC-001", "FORM-001", "SM-001"
+        "DOC-001", "FORM-001", "SM-001",
+        // Web.config — securite, perf, scalabilite
+        "CFG-001", "CFG-002", "CFG-003", "CFG-004", "CFG-005", "CFG-006"
     };
 
     [Fact]
-    public void All_29_rules_registered()
+    public void All_35_rules_registered()
     {
-        Assert.Equal(29, RuleRegistry.All.Count);
+        Assert.Equal(35, RuleRegistry.All.Count);
     }
 
     [Fact]
@@ -42,13 +44,15 @@ public class RegistryTests
     }
 
     [Fact]
-    public void Fixable_count_is_19()
+    public void Fixable_count_is_22()
     {
-        // 19 regles auto-fixables sur 29 totales. Les 5 nouvelles regles (SEC-002
-        // a SCRIPT-001) ne sont auto-fixables qu'a une exception (SEC-002 ajoute
-        // rel="noopener noreferrer"). Les autres demandent une decision humaine.
-        Assert.Equal(19, RuleRegistry.All.Count(r => r.HasFix));
-        Assert.Equal(10, RuleRegistry.All.Count(r => !r.HasFix));
+        // 22 regles auto-fixables sur 35 totales :
+        //   - 19 regles ASPX/ASCX/MASTER de la version 0.3.0
+        //   - 3 nouvelles Web.config auto-fixables (CFG-001, CFG-002, CFG-003).
+        // Les 13 manuelles requierent une decision (SEC-002 archi/auth, securite,
+        // accessibilite, scalabilite — pas de fix mecanique sans contexte).
+        Assert.Equal(22, RuleRegistry.All.Count(r => r.HasFix));
+        Assert.Equal(13, RuleRegistry.All.Count(r => !r.HasFix));
     }
 
     [Theory]
