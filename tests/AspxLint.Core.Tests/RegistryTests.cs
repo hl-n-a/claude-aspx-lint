@@ -39,11 +39,13 @@ public class RegistryTests
     }
 
     [Fact]
-    public void Fixable_count_is_15()
+    public void Fixable_count_is_17()
     {
-        // CLAUDE.md : "15 règles ont un auto-fix, 8 nécessitent une correction manuelle"
-        Assert.Equal(15, RuleRegistry.All.Count(r => r.HasFix));
-        Assert.Equal(8, RuleRegistry.All.Count(r => !r.HasFix));
+        // 17 regles auto-fixables, 6 manuelles. TAG-003 et ATTR-003 ont gagne
+        // un Fix : reparation des balises non equilibrees et merge des attributs
+        // dupliques (avec dedupe special pour `class`).
+        Assert.Equal(17, RuleRegistry.All.Count(r => r.HasFix));
+        Assert.Equal(6, RuleRegistry.All.Count(r => !r.HasFix));
     }
 
     [Theory]

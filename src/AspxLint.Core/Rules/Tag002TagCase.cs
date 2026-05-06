@@ -32,9 +32,13 @@ public sealed class Tag002TagCase : IRule
 
     public IEnumerable<Issue> Detect(string content, string[] lines, RuleContext ctx)
     {
-        for (int i = 0; i < lines.Length; i++)
+        // Mask <% ... %> blocks (including directives like <%@ Control Inherits="...<Generic>" %>)
+        // so we don't false-positive on C# generics or HTML literals embedded in server code.
+        var (_, maskedLines) = RuleHelpers.MaskAndSplit(content);
+
+        for (int i = 0; i < maskedLines.Length; i++)
         {
-            var line = lines[i];
+            var line = maskedLines[i];
             foreach (Match m in DetectRegex.Matches(line))
             {
                 // Skip controles namespaced : asp:Label, uc:Header, etc.
@@ -49,14 +53,17 @@ public sealed class Tag002TagCase : IRule
     public string? Fix(string content, RuleContext ctx)
     {
         // Pour chaque tag de la whitelist, remplace toutes les occurences case-insensitive
-        // par sa forme minuscule. Ne touche que les chevrons d'ouverture (`<` ou `</`),
-        // donc les valeurs d'attributs ne sont jamais affectees.
-        var fixedContent = content;
-        foreach (var tag in HtmlTags)
+        // par sa forme minuscule, MAIS UNIQUEMENT en dehors des blocs <% %>. Sinon on
+        // casse les types C# generics dans les directives (ex: ViewUserControl<MyType>).
+        return RuleHelpers.ApplyOutsideAspBlocks(content, segment =>
         {
-            var re = new Regex(@"<(\/?)(" + tag + @")\b", RegexOptions.IgnoreCase);
-            fixedContent = re.Replace(fixedContent, m => "<" + m.Groups[1].Value + tag);
-        }
-        return fixedContent;
+            var fixedSegment = segment;
+            foreach (var tag in HtmlTags)
+            {
+                var re = new Regex(@"<(\/?)(" + tag + @")\b", RegexOptions.IgnoreCase);
+                fixedSegment = re.Replace(fixedSegment, m => "<" + m.Groups[1].Value + tag);
+            }
+            return fixedSegment;
+        });
     }
 }

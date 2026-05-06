@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AspxLint.Core.Rules;
@@ -18,20 +17,22 @@ public sealed class Attr001MissingQuotes : IRule
         RegexOptions.Compiled);
 
     private static readonly Regex Comments = new(@"<!--|-->", RegexOptions.Compiled);
-    private static readonly Regex Directive = new(@"<%@", RegexOptions.Compiled);
 
-    private static readonly Regex AspBlock = new(@"<%[\s\S]*?%>", RegexOptions.Compiled);
     private static readonly Regex TagWithAttrs = new(
         @"(<[a-zA-Z][a-zA-Z0-9:_\-]*\b)([^>]*)>",
         RegexOptions.Compiled);
 
     public IEnumerable<Issue> Detect(string content, string[] lines, RuleContext ctx)
     {
-        for (int i = 0; i < lines.Length; i++)
+        // Mask <% ... %> globalement (incluant les directives <%@ %> et les
+        // blocs server multi-lignes) pour eviter les faux-positifs sur du
+        // code C# qui contient des paires `attr=value` (ex: dans une chaine).
+        var (_, maskedLines) = RuleHelpers.MaskAndSplit(content);
+
+        for (int i = 0; i < maskedLines.Length; i++)
         {
-            var line = lines[i];
+            var line = maskedLines[i];
             if (Comments.IsMatch(line)) continue;
-            if (Directive.IsMatch(line)) continue;
 
             foreach (Match m in AttrUnquoted.Matches(line))
             {
@@ -51,22 +52,11 @@ public sealed class Attr001MissingQuotes : IRule
     public string? Fix(string content, RuleContext ctx)
     {
         // Decoupe par bloc <% %> pour ne JAMAIS toucher au code serveur.
-        var sb = new StringBuilder(content.Length + 64);
-        int last = 0;
-        foreach (Match m in AspBlock.Matches(content))
-        {
-            sb.Append(FixSegment(content[last..m.Index]));
-            sb.Append(m.Value);
-            last = m.Index + m.Length;
-        }
-        sb.Append(FixSegment(content[last..]));
-        return sb.ToString();
+        return RuleHelpers.ApplyOutsideAspBlocks(content, segment =>
+            TagWithAttrs.Replace(segment, m =>
+                m.Groups[1].Value
+                + AttrUnquoted.Replace(m.Groups[2].Value,
+                    mm => $" {mm.Groups[1].Value}=\"{mm.Groups[2].Value}\"")
+                + ">"));
     }
-
-    private static string FixSegment(string text) =>
-        TagWithAttrs.Replace(text, m =>
-            m.Groups[1].Value
-            + AttrUnquoted.Replace(m.Groups[2].Value,
-                mm => $" {mm.Groups[1].Value}=\"{mm.Groups[2].Value}\"")
-            + ">");
 }

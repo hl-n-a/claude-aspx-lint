@@ -66,10 +66,10 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | DIR-001   | error      | ✓        | Directive @Page/@Control/@Master absente/mal placée |
 | TAG-001   | warning    | ✓        | Balise auto-fermante non XHTML (`<br>` → `<br />`) |
 | TAG-002   | warning    | ✓        | Casse incohérente des balises HTML                 |
-| TAG-003   | error      |          | Balises non équilibrées (manuel)                   |
+| TAG-003   | error      | ✓        | Balises non équilibrées (insère `</tag>` manquants) |
 | ATTR-001  | warning    | ✓        | Attribut sans guillemets                           |
 | ATTR-002  | info       | ✓        | Mélange `'` / `"` dans les attributs               |
-| ATTR-003  | error      |          | Attribut dupliqué dans une balise (manuel)         |
+| ATTR-003  | error      | ✓        | Attribut dupliqué — merge `class`, garde 1er ailleurs |
 | ASP-001   | error      | ✓        | Contrôle serveur sans `runat="server"`             |
 | ASP-002   | error      |          | ID de contrôle dupliqué (manuel)                   |
 | ASP-003   | error      |          | ContentPlaceHolder sans ID (MASTER)                |
@@ -87,7 +87,7 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | FORM-001  | error      | ✓        | `<form>` sans `runat="server"` dans ASPX           |
 | SM-001    | error      |          | Plusieurs `<asp:ScriptManager>`                    |
 
-15 règles ont un auto-fix, 8 nécessitent une correction manuelle (renommage
+17 règles ont un auto-fix, 6 nécessitent une correction manuelle (renommage
 d'IDs, restructuration HTML, etc.).
 
 ## Bugs résolus (à ne pas régresser)

@@ -34,11 +34,11 @@ public class RulesApiTests : IClassFixture<ApiFixture>
     }
 
     [Fact]
-    public async Task Rules_hasFix_count_matches_15()
+    public async Task Rules_hasFix_count_matches_17()
     {
         var client = _fx.CreateAuthClient();
         var r = await client.GetFromJsonAsync<JsonElement>("/api/rules");
         var fixable = r.EnumerateArray().Count(rule => rule.GetProperty("hasFix").GetBoolean());
-        Assert.Equal(15, fixable);
+        Assert.Equal(17, fixable);
     }
 }

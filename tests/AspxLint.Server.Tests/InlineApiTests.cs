@@ -88,9 +88,9 @@ public class InlineApiTests : IClassFixture<ApiFixture>
     public async Task Fix_non_fixable_rule_returns_400()
     {
         var client = _fx.CreateAuthClient();
-        // TAG-003 detecte les balises non equilibrees mais HasFix=false
+        // CHAR-001 (& non echappe) reste non-fixable : trop risque d'auto-encoder.
         var r = await client.PostAsJsonAsync("/api/fix",
-            new { content = "<div>", ext = "aspx", ruleId = "TAG-003" });
+            new { content = "Tom & Jerry", ext = "aspx", ruleId = "CHAR-001" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 

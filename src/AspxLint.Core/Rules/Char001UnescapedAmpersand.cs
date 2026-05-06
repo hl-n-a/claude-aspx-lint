@@ -16,16 +16,16 @@ public sealed class Char001UnescapedAmpersand : IRule
         @"&(?!(?:[a-zA-Z][a-zA-Z0-9]{1,8}|#\d+|#x[0-9a-fA-F]+);)",
         RegexOptions.Compiled);
 
-    private static readonly Regex AspOnLine = new(@"<%[\s\S]*?%>", RegexOptions.Compiled);
-
     public IEnumerable<Issue> Detect(string content, string[] lines, RuleContext ctx)
     {
-        for (int i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i];
-            // Skip lignes contenant du code serveur — trop d'ambiguite (ex. && en C#).
-            if (AspOnLine.IsMatch(line)) continue;
+        // Mask globalement les blocs <% ... %> (incluant ceux qui s'etalent sur
+        // plusieurs lignes : `<% if (a && b) { %>` ouvert ligne N, ferme ligne N+1).
+        // Sans masquage, les `&&` du C# embarque generaient des faux-positifs.
+        var (_, maskedLines) = RuleHelpers.MaskAndSplit(content);
 
+        for (int i = 0; i < maskedLines.Length; i++)
+        {
+            var line = maskedLines[i];
             foreach (Match m in DetectRegex.Matches(line))
             {
                 var from = Math.Max(0, m.Index - 5);
