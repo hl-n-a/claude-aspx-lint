@@ -6,11 +6,11 @@ public class RulesApiTests : IClassFixture<ApiFixture>
     public RulesApiTests(ApiFixture fx) => _fx = fx;
 
     [Fact]
-    public async Task Rules_returns_23_entries()
+    public async Task Rules_returns_24_entries()
     {
         var client = _fx.CreateAuthClient();
         var r = await client.GetFromJsonAsync<JsonElement>("/api/rules");
-        Assert.Equal(23, r.GetArrayLength());
+        Assert.Equal(24, r.GetArrayLength());
     }
 
     [Fact]
@@ -34,11 +34,11 @@ public class RulesApiTests : IClassFixture<ApiFixture>
     }
 
     [Fact]
-    public async Task Rules_hasFix_count_matches_17()
+    public async Task Rules_hasFix_count_matches_18()
     {
         var client = _fx.CreateAuthClient();
         var r = await client.GetFromJsonAsync<JsonElement>("/api/rules");
         var fixable = r.EnumerateArray().Count(rule => rule.GetProperty("hasFix").GetBoolean());
-        Assert.Equal(17, fixable);
+        Assert.Equal(18, fixable);
     }
 }

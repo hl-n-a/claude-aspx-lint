@@ -32,6 +32,7 @@ public static class RuleRegistry
         new Ws003ConsecutiveBlankLines(),
         new Ws004FinalNewline(),
         new Ws005Bom(),
+        new Ws006TrailingBlankLines(),
 
         // Encodage
         new Char001UnescapedAmpersand(),

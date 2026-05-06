@@ -8,15 +8,15 @@ public class RegistryTests
         "TAG-001", "TAG-002", "TAG-003",
         "ATTR-001", "ATTR-002", "ATTR-003",
         "ASP-001", "ASP-002", "ASP-003", "ASP-004", "ASP-005",
-        "WS-001", "WS-002", "WS-003", "WS-004", "WS-005",
+        "WS-001", "WS-002", "WS-003", "WS-004", "WS-005", "WS-006",
         "CHAR-001", "COM-001", "SEC-001",
         "DOC-001", "FORM-001", "SM-001"
     };
 
     [Fact]
-    public void All_23_rules_registered()
+    public void All_24_rules_registered()
     {
-        Assert.Equal(23, RuleRegistry.All.Count);
+        Assert.Equal(24, RuleRegistry.All.Count);
     }
 
     [Fact]
@@ -39,12 +39,11 @@ public class RegistryTests
     }
 
     [Fact]
-    public void Fixable_count_is_17()
+    public void Fixable_count_is_18()
     {
-        // 17 regles auto-fixables, 6 manuelles. TAG-003 et ATTR-003 ont gagne
-        // un Fix : reparation des balises non equilibrees et merge des attributs
-        // dupliques (avec dedupe special pour `class`).
-        Assert.Equal(17, RuleRegistry.All.Count(r => r.HasFix));
+        // 18 regles auto-fixables, 6 manuelles. WS-006 nouvelle : trailing blank
+        // lines en fin de fichier (a cote de WS-003 milieu et WS-004 final \n).
+        Assert.Equal(18, RuleRegistry.All.Count(r => r.HasFix));
         Assert.Equal(6, RuleRegistry.All.Count(r => !r.HasFix));
     }
 

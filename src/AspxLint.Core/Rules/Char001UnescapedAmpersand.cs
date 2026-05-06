@@ -18,10 +18,10 @@ public sealed class Char001UnescapedAmpersand : IRule
 
     public IEnumerable<Issue> Detect(string content, string[] lines, RuleContext ctx)
     {
-        // Mask globalement les blocs <% ... %> (incluant ceux qui s'etalent sur
-        // plusieurs lignes : `<% if (a && b) { %>` ouvert ligne N, ferme ligne N+1).
-        // Sans masquage, les `&&` du C# embarque generaient des faux-positifs.
-        var (_, maskedLines) = RuleHelpers.MaskAndSplit(content);
+        // Mask les blocs <% ... %>, <script>, <style>, et commentaires HTML
+        // <!-- -->. Pour CHAR-001 ces zones ne sont pas du contenu HTML : `&&`
+        // dans du JS ou du C# n'a aucune raison d'etre encode en `&amp;`.
+        var (_, maskedLines) = RuleHelpers.MaskAndSplitFull(content);
 
         for (int i = 0; i < maskedLines.Length; i++)
         {

@@ -25,13 +25,27 @@ internal static class RuleHelpers
         new(@"<%--[\s\S]*?--%>|<%[\s\S]*?%>", RegexOptions.Compiled);
 
     /// <summary>
-    /// Remplace tous les blocs &lt;%...%&gt; par des espaces de meme longueur.
-    /// Preserve les positions ligne/colonne pour que les issues rapportent
-    /// les bonnes coordonnees.
+    /// Remplace tous les blocs &lt;%...%&gt; par des espaces de meme longueur,
+    /// MAIS en preservant les newlines internes. Sans ca, un bloc multi-ligne
+    /// (ex: &lt;% ... %&gt; sur 18 lignes) fusionne en une seule "ligne" apres
+    /// Split, et tout l'index de lignes apres le bloc devient incoherent —
+    /// les detections continuent a tirer sur du C# embarque qui aurait du etre
+    /// masque. Ce fut un faux-positif sur des fichiers comme Demande/Index.aspx
+    /// ou les `&amp;&amp;` du C# generaient des CHAR-001.
     /// </summary>
     public static string MaskAspBlocks(string content)
     {
-        return AspBlock.Replace(content, m => new string(' ', m.Length));
+        return AspBlock.Replace(content, m =>
+        {
+            var src = m.Value;
+            var buf = new char[src.Length];
+            for (int i = 0; i < src.Length; i++)
+            {
+                var c = src[i];
+                buf[i] = (c == '\n' || c == '\r') ? c : ' ';
+            }
+            return new string(buf);
+        });
     }
 
     /// <summary>
@@ -43,6 +57,48 @@ internal static class RuleHelpers
         var masked = MaskAspBlocks(content);
         var lines = masked.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
         return (masked, lines);
+    }
+
+    private static readonly Regex ScriptBlock = new(
+        @"<script\b[^>]*>[\s\S]*?<\/script>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex StyleBlock = new(
+        @"<style\b[^>]*>[\s\S]*?<\/style>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex HtmlComment = new(
+        @"<!--[\s\S]*?-->", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Comme MaskAspBlocks, mais en plus on masque les blocs &lt;script&gt;,
+    /// &lt;style&gt; et les commentaires HTML &lt;!-- --&gt;. Utile pour les regles
+    /// qui detectent du contenu HTML (CHAR-001, TAG-003, etc.) et n'ont aucune
+    /// raison d'inspecter du JS / CSS / commentaires.
+    /// Toutes les substitutions preservent les newlines pour ne pas decaler
+    /// l'index de lignes.
+    /// </summary>
+    public static (string MaskedContent, string[] MaskedLines) MaskAndSplitFull(string content)
+    {
+        var masked = MaskAspBlocks(content);
+        masked = ReplacePreservingNewlines(masked, ScriptBlock);
+        masked = ReplacePreservingNewlines(masked, StyleBlock);
+        masked = ReplacePreservingNewlines(masked, HtmlComment);
+        var lines = masked.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        return (masked, lines);
+    }
+
+    private static string ReplacePreservingNewlines(string content, Regex re)
+    {
+        return re.Replace(content, m =>
+        {
+            var src = m.Value;
+            var buf = new char[src.Length];
+            for (int i = 0; i < src.Length; i++)
+            {
+                var c = src[i];
+                buf[i] = (c == '\n' || c == '\r') ? c : ' ';
+            }
+            return new string(buf);
+        });
     }
 
     /// <summary>

@@ -20,7 +20,7 @@ serveur, aucune build step, aucune télémétrie. Garder cette propriété.
 ## Architecture du script
 
 ```
-RULES = [...]              // 23 règles, chacune { id, name, severity, desc, detect, fix? }
+RULES = [...]              // 24 règles, chacune { id, name, severity, desc, detect, fix? }
 state = { files, currentFileId, filter, viewMode, fixedCount }
 
 // Pipeline
@@ -80,6 +80,7 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | WS-003    | info       | ✓        | Plus de 2 lignes vides consécutives                |
 | WS-004    | info       | ✓        | Pas de saut de ligne final                         |
 | WS-005    | warning    | ✓        | BOM en début de fichier                            |
+| WS-006    | info       | ✓        | Lignes vides en fin de fichier (collapse → 1 `\n`) |
 | CHAR-001  | warning    |          | `&` non échappé (manuel — risqué d'auto-fixer)     |
 | COM-001   | warning    |          | `--` à l'intérieur d'un commentaire HTML           |
 | SEC-001   | error      | ✓        | `EnableViewStateMac="false"`                       |
@@ -87,7 +88,7 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | FORM-001  | error      | ✓        | `<form>` sans `runat="server"` dans ASPX           |
 | SM-001    | error      |          | Plusieurs `<asp:ScriptManager>`                    |
 
-17 règles ont un auto-fix, 6 nécessitent une correction manuelle (renommage
+18 règles ont un auto-fix, 6 nécessitent une correction manuelle (renommage
 d'IDs, restructuration HTML, etc.).
 
 ## Bugs résolus (à ne pas régresser)

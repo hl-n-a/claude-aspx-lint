@@ -317,6 +317,123 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void CHAR001_ignores_csharp_in_multiline_asp_block()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        // Cas reel rencontre dans Demande/Index.aspx : un <% %> qui s'etend sur
+        // ~18 lignes avec du C# qui contient && et &. Avant le fix de
+        // MaskAspBlocks (preservation des newlines), les lignes apres la ligne 1
+        // du block etaient decalees a l'index, et CHAR-001 detectait les `&&`
+        // comme du HTML.
+        var content =
+            "<asp:Content runat=\"server\">\n" +
+            "<%\n" +
+            "    string a = \"x\";\n" +
+            "    if (m != null && m.Foo == 1)\n" +
+            "    {\n" +
+            "        if (Model.Voyage.Form != null && (Model.IsDevis || (Model.ProductObj != null && !Model.ProductObj.aerienInclus)))\n" +
+            "        {\n" +
+            "            a = \"y\";\n" +
+            "        }\n" +
+            "    }\n" +
+            "%>\n" +
+            "</asp:Content>\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void CHAR001_ignores_ampersand_inside_script_block()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        // Cas reel rencontre dans Demande/Index.aspx : du JS dans <script type="text/plain">
+        // contient des `s && s !== "x"`. Ces `&&` sont du JS, pas du HTML.
+        var content =
+            "<div>\n" +
+            "<script type=\"text/plain\" data-cookieconsent=\"marketing\">\n" +
+            "  function f(s) { return s && s !== \"loaded\" && s !== \"complete\"; }\n" +
+            "</script>\n" +
+            "</div>\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void CHAR001_ignores_ampersand_inside_style_block()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "CHAR-001");
+        var content =
+            "<div>\n" +
+            "<style>\n" +
+            "  /* comment with & in it */\n" +
+            "  a:hover & .x { color: red; }\n" +
+            "</style>\n" +
+            "</div>\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void TAG002_ignores_html_inside_multiline_asp_block()
+    {
+        // Sanity check supplementaire : avant le fix de MaskAspBlocks, les
+        // newlines internes etaient ecrases en espaces, et tout l'indexage
+        // de lignes apres un bloc multi-ligne devenait fausse.
+        var rule = RuleRegistry.All.Single(r => r.Id == "TAG-002");
+        var content =
+            "<%\n" +
+            "    string s = \"<DIV>some HTML in C# string</DIV>\";\n" +
+            "    int x = 1 + 2;\n" +
+            "%>\n" +
+            "<div>real html</div>\n";
+        var ctx = new RuleContext("aspx", "x.aspx");
+        // Le <DIV> dans la chaine C# ne doit PAS etre detecte. Le <div> hors-bloc
+        // est en minuscule donc ne tire pas non plus.
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void WS006_detects_trailing_blank_lines()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "WS-006");
+        // 3 newlines en fin = 2 lignes vides surnumeraires.
+        var content = "<p>x</p>\n\n\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var issues = rule.Detect(content, content.Split('\n'), ctx).ToList();
+        Assert.Single(issues);
+    }
+
+    [Fact]
+    public void WS006_does_not_fire_on_single_final_newline()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "WS-006");
+        var content = "<p>x</p>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void WS006_fix_collapses_trailing_blanks_to_one_newline()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "WS-006");
+        var content = "<p>x</p>\n\n\n  \n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var fixed1 = rule.Fix(content, ctx)!;
+        Assert.Equal("<p>x</p>\n", fixed1);
+    }
+
+    [Fact]
+    public void WS006_fix_is_idempotent()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "WS-006");
+        var content = "<p>x</p>\n\n\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var first = rule.Fix(content, ctx)!;
+        var second = rule.Fix(first, ctx)!;
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
     public void TAG003_ignores_html_inside_server_comment_with_interpolation()
     {
         var rule = RuleRegistry.All.Single(r => r.Id == "TAG-003");

@@ -115,7 +115,7 @@ public class CliRunnerTests
         Assert.Equal(1, runs.GetArrayLength());
         var driver = runs[0].GetProperty("tool").GetProperty("driver");
         Assert.Equal("aspx-lint", driver.GetProperty("name").GetString());
-        Assert.Equal(23, driver.GetProperty("rules").GetArrayLength());
+        Assert.Equal(24, driver.GetProperty("rules").GetArrayLength());
         Assert.True(runs[0].GetProperty("results").GetArrayLength() > 0);
     }
 
