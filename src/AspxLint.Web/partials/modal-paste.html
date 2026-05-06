@@ -1,0 +1,19 @@
+<!-- Paste Modal -->
+<div class="modal-overlay" id="pasteModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Coller votre code</span>
+      <button class="btn ghost small" onclick="closePasteModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section-title">Nom du fichier (avec extension)</div>
+      <input type="text" id="pasteFileName" placeholder="exemple.aspx" value="snippet.aspx" />
+      <div class="modal-section-title">Contenu</div>
+      <textarea id="pasteContent" placeholder="Collez votre code ASPX/ASCX/MASTER ici..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closePasteModal()">✕ Annuler</button>
+      <button class="btn primary" onclick="addPastedFile()">🔍 Analyser</button>
+    </div>
+  </div>
+</div>

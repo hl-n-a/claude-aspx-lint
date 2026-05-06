@@ -1,0 +1,22 @@
+<!-- Browse Modal -->
+<div class="modal-overlay" id="browseModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Choisir un dossier à scanner</span>
+      <button class="btn ghost small" onclick="closeBrowseModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="browse-toolbar">
+        <button class="btn small ghost" id="browseUpBtn" onclick="browseUp()">↑ Dossier parent</button>
+        <button class="btn small ghost" onclick="browseRefresh()">⟳ Rafraîchir</button>
+      </div>
+      <div class="browse-path" id="browsePath">—</div>
+      <div class="browse-list" id="browseList"><div class="browse-empty">Chargement…</div></div>
+      <div class="browse-here" id="browseHere"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeBrowseModal()">✕ Annuler</button>
+      <button class="btn primary" id="browseScanBtn" onclick="browseScanCurrent()">🔍 Scanner ce dossier</button>
+    </div>
+  </div>
+</div>

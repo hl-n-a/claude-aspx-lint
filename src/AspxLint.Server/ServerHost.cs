@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using AspxLint.Core;
 using QRCoder;
 
@@ -283,6 +284,186 @@ public static class ServerHost
             var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
             return rule.Detect(content, lines, ctx).Count();
         }
+
+        // Recherche d'un dossier par nom (BFS) sous AllowedRoot. Utilise par le drop
+        // d'un dossier dans la dashboard : on a le nom mais pas le chemin absolu
+        // (le navigateur ne l'expose pas), donc on le cherche cote serveur.
+        app.MapGet("/api/find-folder", (string? name, int? limit) =>
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return Results.BadRequest(new { error = "Parametre 'name' requis." });
+
+            var max = Math.Clamp(limit ?? 20, 1, 100);
+            var root = session.AllowedRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+                return Results.Ok(new { matches = Array.Empty<object>(), root = (string?)null, visited = 0 });
+
+            session.Log("INFO", $"find-folder name='{name}' root={root} limit={max}");
+
+            var matches = new List<object>();
+            var queue = new Queue<string>();
+            queue.Enqueue(root);
+            int visited = 0;
+            const int MaxVisits = 8000;   // garde-fou contre les arbo enormes (node_modules, etc.)
+
+            while (queue.Count > 0 && matches.Count < max && visited < MaxVisits)
+            {
+                var dir = queue.Dequeue();
+                visited++;
+                try
+                {
+                    foreach (var sub in Directory.EnumerateDirectories(dir))
+                    {
+                        if (Path.GetFileName(sub).Equals(name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            int aspxCount = 0;
+                            try
+                            {
+                                aspxCount = Directory.EnumerateFiles(sub, "*", SearchOption.AllDirectories)
+                                    .Take(500)   // capping pour pas exploser sur un .git ou node_modules
+                                    .Count(f =>
+                                    {
+                                        var ext = Path.GetExtension(f).ToLowerInvariant();
+                                        return ext is ".aspx" or ".ascx" or ".master" or ".asax";
+                                    });
+                            }
+                            catch { }
+                            matches.Add(new { name = Path.GetFileName(sub), path = sub, aspxCount });
+                            if (matches.Count >= max) break;
+                        }
+                        queue.Enqueue(sub);
+                    }
+                }
+                catch { /* acces refuse, dossier disparu, etc. — on continue */ }
+            }
+
+            return Results.Ok(new { matches, root, visited });
+        });
+
+        // Folder explorer : liste les sous-dossiers (et un apercu fichiers .aspx/.ascx/.master/.asax)
+        // sous AllowedRoot. Si AllowedRoot est null, le path demande peut etre n'importe ou,
+        // mais sans path on retourne les drives Windows ou "/" sur Unix.
+        app.MapGet("/api/browse", (string? path) =>
+        {
+            string? requestedFull = null;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try { requestedFull = Path.GetFullPath(path); }
+                catch (Exception ex)
+                {
+                    session.Log("WARN", $"browse rejected (bad path): {ex.Message}");
+                    return Results.BadRequest(new { error = "Chemin invalide." });
+                }
+            }
+
+            // Pas de path → racine logique : AllowedRoot s'il existe, sinon les drives (Windows) / "/" (Unix).
+            if (requestedFull is null)
+            {
+                if (session.AllowedRoot is not null)
+                {
+                    requestedFull = Path.GetFullPath(session.AllowedRoot);
+                }
+                else
+                {
+                    // Liste des drives / racine Unix
+                    var roots = DriveInfo.GetDrives()
+                        .Where(d => d.IsReady)
+                        .Select(d => new
+                        {
+                            name = d.Name,
+                            path = d.RootDirectory.FullName,
+                            isDirectory = true,
+                            aspxCount = 0
+                        })
+                        .ToList();
+                    return Results.Ok(new
+                    {
+                        path = (string?)null,
+                        parent = (string?)null,
+                        allowedRoot = (string?)null,
+                        entries = roots
+                    });
+                }
+            }
+
+            if (!session.IsUnderAllowedRoot(requestedFull))
+            {
+                session.Log("WARN", $"browse refused (out of allowed root) path={requestedFull}");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            if (!Directory.Exists(requestedFull))
+                return Results.NotFound(new { error = "Dossier introuvable." });
+
+            string? parent = null;
+            try
+            {
+                var p = Directory.GetParent(requestedFull)?.FullName;
+                if (p is not null && session.IsUnderAllowedRoot(p)) parent = p;
+            }
+            catch { /* root, pas de parent */ }
+
+            try
+            {
+                var dirs = Directory.EnumerateDirectories(requestedFull)
+                    .Select(d =>
+                    {
+                        int aspxCount = 0;
+                        try
+                        {
+                            // Compte rapide (non recursif) des fichiers .aspx/.ascx/.master/.asax dans le sous-dossier
+                            // pour donner un indice visuel a l'utilisateur. Erreurs silencieuses (acces refuse, etc.).
+                            aspxCount = Directory.EnumerateFiles(d)
+                                .Count(f =>
+                                {
+                                    var ext = Path.GetExtension(f).ToLowerInvariant();
+                                    return ext is ".aspx" or ".ascx" or ".master" or ".asax";
+                                });
+                        }
+                        catch { }
+                        return new
+                        {
+                            name = Path.GetFileName(d),
+                            path = d,
+                            isDirectory = true,
+                            aspxCount
+                        };
+                    })
+                    .OrderBy(e => e.name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                int hereAspxCount = 0;
+                try
+                {
+                    hereAspxCount = Directory.EnumerateFiles(requestedFull)
+                        .Count(f =>
+                        {
+                            var ext = Path.GetExtension(f).ToLowerInvariant();
+                            return ext is ".aspx" or ".ascx" or ".master" or ".asax";
+                        });
+                }
+                catch { }
+
+                return Results.Ok(new
+                {
+                    path = requestedFull,
+                    parent,
+                    allowedRoot = session.AllowedRoot,
+                    hereAspxCount,
+                    entries = dirs
+                });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                session.Log("WARN", $"browse access denied: {ex.Message}");
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch (Exception ex)
+            {
+                session.Log("ERROR", $"browse crashed: {ex}");
+                return Results.Problem(ex.Message);
+            }
+        });
 
         app.MapPost("/api/scan", (ScanRequest req) =>
         {
@@ -568,6 +749,16 @@ public static class ServerHost
     ///   3. Ressource embarquee "AspxLint.Web.index.html" dans le .dll
     ///      (mode .exe self-contained, conteneur Docker, etc.)
     /// </summary>
+    /// <summary>
+     /// Marqueur d'inclusion dans index.html : {{include:NAME}}.
+     /// NAME est resolu relativement au dossier src/AspxLint.Web/ en mode disk,
+     /// ou comme nom de ressource AspxLint.Web.NAME (avec / -> .) en mode embedded.
+     /// Les noms doivent etre des chemins relatifs simples (lettres, chiffres,
+     /// '.', '/', '-', '_') — pas de '..' pour eviter de remonter en dehors du dossier.
+     /// </summary>
+    private static readonly Regex IncludeMarker =
+        new(@"\{\{include:([a-zA-Z0-9_./\-]+)\}\}", RegexOptions.Compiled);
+
     private static (Func<Task<string>> Load, string Source, string? ProjectRoot) ResolveDashboard()
     {
         // Disk d'abord pour le hot-reload en dev.
@@ -576,11 +767,23 @@ public static class ServerHost
         if (diskCandidate != null)
         {
             var path = diskCandidate;
+            var webDir = Path.GetDirectoryName(path)!;
             var root = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(path)));
-            return (() => File.ReadAllTextAsync(path), $"disk:{path}", root);
+            return (
+                async () =>
+                {
+                    var raw = await File.ReadAllTextAsync(path);
+                    return await ExpandIncludes(raw, async name =>
+                    {
+                        var inc = Path.Combine(webDir, name.Replace('/', Path.DirectorySeparatorChar));
+                        return await File.ReadAllTextAsync(inc);
+                    });
+                },
+                $"disk:{path}", root);
         }
 
-        // Fallback : ressource embarquee.
+        // Fallback : ressource embarquee. On verifie aussi que les ressources
+        // referencees existent (sinon on aura des marqueurs non resolus a runtime).
         var asm = typeof(ServerHost).Assembly;
         const string resourceName = "AspxLint.Web.index.html";
         using (var probe = asm.GetManifestResourceStream(resourceName))
@@ -598,10 +801,49 @@ public static class ServerHost
         static async Task<string> LoadEmbedded()
         {
             var asm = typeof(ServerHost).Assembly;
-            using var stream = asm.GetManifestResourceStream("AspxLint.Web.index.html")!;
-            using var reader = new StreamReader(stream);
-            return await reader.ReadToEndAsync();
+            string raw;
+            using (var stream = asm.GetManifestResourceStream("AspxLint.Web.index.html")!)
+            using (var reader = new StreamReader(stream))
+                raw = await reader.ReadToEndAsync();
+
+            return await ExpandIncludes(raw, async name =>
+            {
+                // {{include:partials/modal-paste.html}} -> "AspxLint.Web.partials.modal-paste.html"
+                var resName = "AspxLint.Web." + name.Replace('/', '.');
+                using var s = asm.GetManifestResourceStream(resName);
+                if (s == null)
+                {
+                    var available = string.Join(", ", asm.GetManifestResourceNames());
+                    throw new FileNotFoundException(
+                        $"Ressource embarquee '{resName}' introuvable. Disponibles : [{available}]");
+                }
+                using var r = new StreamReader(s);
+                return await r.ReadToEndAsync();
+            });
         }
+    }
+
+    /// <summary>
+    /// Remplace tous les {{include:NAME}} par le contenu retourne par <paramref name="loader"/>.
+    /// Inclusion plate (1 niveau) : si un fichier inclus contient lui-meme un marqueur,
+    /// il sera ignore. Suffisant pour la dashboard ou app.js / styles.css n'incluent rien.
+    /// </summary>
+    private static async Task<string> ExpandIncludes(string content, Func<string, Task<string>> loader)
+    {
+        var matches = IncludeMarker.Matches(content);
+        if (matches.Count == 0) return content;
+
+        var sb = new StringBuilder(content.Length + 4096);
+        int last = 0;
+        foreach (Match m in matches)
+        {
+            sb.Append(content, last, m.Index - last);
+            var name = m.Groups[1].Value;
+            sb.Append(await loader(name));
+            last = m.Index + m.Length;
+        }
+        sb.Append(content, last, content.Length - last);
+        return sb.ToString();
     }
 
     /// <summary>
