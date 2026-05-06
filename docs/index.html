@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>aspx-lint — formatage / diagnostic ASP.NET Web Forms</title>
+<meta name="description" content="Linter et auto-fixer pour fichiers ASP.NET Web Forms (.aspx, .ascx, .master, .asax). 29 règles, 19 auto-fixables." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand-mark">aspx·lint</span>
+    <span class="brand-name">FORMATAGE / DIAGNOSTIC</span>
+  </div>
+  <nav>
+    <a href="https://github.com/hl-n-a/claude-aspx-lint">GitHub</a>
+    <a href="https://www.nuget.org/packages/aspx-lint/">NuGet</a>
+    <a href="coverage/">Coverage</a>
+    <a href="https://github.com/hl-n-a/claude-aspx-lint/blob/main/CONTRIBUTING.md">Contribuer</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1><em>Une revue de code attentive</em><br/>pour ASPX, ASCX &amp; MASTER.</h1>
+    <p class="lede">Linter et auto-fixer pour fichiers ASP.NET Web Forms.
+       29 règles couvrant directives de page, balises XHTML, contrôles serveur,
+       indentation, encodage, sécurité, accessibilité.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/hl-n-a/claude-aspx-lint">Code source</a>
+      <a class="btn ghost" href="https://www.nuget.org/packages/aspx-lint/">dotnet tool install -g aspx-lint</a>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="stat-card">
+      <div class="stat-num" id="ruleCount">29</div>
+      <div class="stat-label">règles</div>
+      <div class="stat-sub" id="autoFixCount">19 auto-fixables</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" id="coverageLines">86.6%</div>
+      <div class="stat-label">coverage lignes</div>
+      <div class="stat-sub"><a href="coverage/">détails →</a></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" id="coverageBranches">77.6%</div>
+      <div class="stat-label">coverage branches</div>
+      <div class="stat-sub" id="testCount">430+ tests</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" id="loc">~5 000</div>
+      <div class="stat-label">lignes de C#</div>
+      <div class="stat-sub" id="lastUpdate">build récent</div>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2>Trois manières de l'utiliser</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">▶</div>
+        <h3>CLI</h3>
+        <p>Outil global NuGet, pour CI et lint local.</p>
+        <pre><code>dotnet tool install -g aspx-lint
+aspx-lint scan ./MyProject
+aspx-lint fix  ./MyProject --dry-run
+aspx-lint watch ./MyProject</code></pre>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⌘</div>
+        <h3>Dashboard Web</h3>
+        <p>Single-page HTML servie par AspxLint.Server. Inspection
+           visuelle, drag-drop, command palette (Ctrl+P), find/replace,
+           edit-in-place avec syntax highlighting live, mini-map style
+           VS Code, diff intra-ligne.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">▣</div>
+        <h3>App Desktop</h3>
+        <p>Windows WPF + WebView2. Single-instance kill-and-relaunch,
+           file watcher local, drag-drop natif, sans URL bar ni
+           devtools — l'expérience d'une app native.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2>Sortie CLI multi-format</h2>
+    <div class="format-grid">
+      <span class="format-badge">text</span>
+      <span class="format-badge">JSON</span>
+      <span class="format-badge">SARIF</span>
+      <span class="format-badge">JUnit XML</span>
+      <span class="format-badge">CodeClimate</span>
+      <span class="format-badge">TAP v14</span>
+    </div>
+    <p class="format-note">Pour intégration CI : SARIF est uploadé vers GitHub
+       Code Scanning (annotations dans les PRs), CodeClimate est consommé par
+       les Quality Gates Codacy/CodeClimate, JUnit par les agrégateurs de
+       tests classiques.</p>
+  </section>
+
+  <section class="features">
+    <h2>Catégories de règles</h2>
+    <div class="rule-categories">
+      <span class="rule-cat" title="Directive @Page/@Control/@Master">DIR (1)</span>
+      <span class="rule-cat" title="Balises XHTML, casse, équilibre">TAG (3)</span>
+      <span class="rule-cat" title="Attributs : guillemets, doublons">ATTR (3)</span>
+      <span class="rule-cat" title="Contrôles serveur : runat, IDs, ContentPlaceHolder">ASP (5)</span>
+      <span class="rule-cat" title="Whitespace : trailing, mixed indent, blank lines, BOM">WS (6)</span>
+      <span class="rule-cat" title="Caractères : & non échappé">CHAR (1)</span>
+      <span class="rule-cat" title="Commentaires : -- imbriqués">COM (1)</span>
+      <span class="rule-cat" title="Sécurité : ViewStateMac, tabnabbing, URLs locales">SEC (3)</span>
+      <span class="rule-cat" title="Accessibilité : alt manquant">A11Y (1)</span>
+      <span class="rule-cat" title="Style inline">STYLE (1)</span>
+      <span class="rule-cat" title="Handlers JS inline">SCRIPT (1)</span>
+      <span class="rule-cat" title="DOCTYPE">DOC (1)</span>
+      <span class="rule-cat" title="form runat=server">FORM (1)</span>
+      <span class="rule-cat" title="ScriptManager">SM (1)</span>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2>Performance</h2>
+    <div class="perf-grid">
+      <div class="perf-item">
+        <div class="perf-num">~0.7s</div>
+        <div class="perf-label">350 fichiers, scan parallèle</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-num">~99%</div>
+        <div class="perf-label">de skip en watch (cache SHA1)</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-num">~150 MB</div>
+        <div class="perf-label">image Docker multi-arch</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="links">
+    <h2>Ressources</h2>
+    <ul>
+      <li><a href="coverage/">Rapport de coverage HTML browsable</a></li>
+      <li><a href="https://github.com/hl-n-a/claude-aspx-lint/blob/main/README.md">README — installation, configuration, intégration CI</a></li>
+      <li><a href="https://github.com/hl-n-a/claude-aspx-lint/blob/main/CONTRIBUTING.md">CONTRIBUTING — onboarding, ajouter une règle, workflow PR</a></li>
+      <li><a href="https://github.com/hl-n-a/claude-aspx-lint/blob/main/CHANGELOG.md">CHANGELOG — historique des versions</a></li>
+      <li><a href="https://github.com/hl-n-a/claude-aspx-lint/issues">Issues GitHub</a></li>
+      <li><a href="https://github.com/hl-n-a/claude-aspx-lint/releases">Releases (binaires Windows + paquet NuGet)</a></li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  <span>aspx-lint — MIT License</span>
+  <span class="footer-build">build <span id="buildSha">main</span> · <span id="buildDate">—</span></span>
+</footer>
+</body>
+</html>

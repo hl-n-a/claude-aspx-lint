@@ -165,13 +165,16 @@ jobs:
         continue-on-error: true
 
   # ===================================================================
-  # Deploy le rapport coverage HTML sur GitHub Pages — uniquement
-  # apres un push sur main qui a passe la CI. Pre-requis :
-  #   Settings > Pages > Source: GitHub Actions
-  # Une fois actif, le rapport est browsable a :
-  #   https://<user>.github.io/<repo>/
+  # Deploy GitHub Pages — uniquement apres un push sur main qui a passe
+  # la CI. Pre-requis : Settings > Pages > Source: GitHub Actions.
+  #
+  # On publie le site stats (docs/) avec injection des chiffres live
+  # (coverage, rule count, test count, etc.) + le rapport coverage HTML
+  # browsable sous /coverage/.
+  #   https://<user>.github.io/<repo>/           → stats site
+  #   https://<user>.github.io/<repo>/coverage/  → rapport coverage
   # ===================================================================
-  deploy-coverage-pages:
+  deploy-pages:
     needs: build-and-test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
@@ -179,15 +182,73 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      contents: read
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Checkout (pour docs/ et compteurs de regles)
+        uses: actions/checkout@v5
+
       - name: Download coverage HTML artifact
         uses: actions/download-artifact@v4
         with:
           name: coverage-html
           path: coverage-html
+
+      - name: Build site Pages (docs/ + coverage/)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          # Site stats : docs/ a la racine.
+          cp -R docs/* _site/
+          # Rapport coverage HTML sous /coverage/.
+          mkdir -p _site/coverage
+          cp -R coverage-html/* _site/coverage/
+
+          # ==== Stats injectees dans index.html ====
+          # Rule count : compte les classes dans Rules/ (1 fichier = 1 regle).
+          RULE_COUNT=$(ls src/AspxLint.Core/Rules/*.cs 2>/dev/null | wc -l | tr -d ' ')
+          # Auto-fix count : grep public bool HasFix => true; (pas false)
+          AUTO_FIX_COUNT=$(grep -l "public bool HasFix => true" src/AspxLint.Core/Rules/*.cs 2>/dev/null | wc -l | tr -d ' ')
+          # Coverage % depuis la cobertura (line + branch).
+          COBERTURA=$(find coverage-html -name 'Cobertura.xml' -o -name 'coverage.cobertura.xml' | head -1)
+          if [ -n "$COBERTURA" ]; then
+            LINE_RATE=$(grep -oE 'line-rate="[0-9.]+"' "$COBERTURA" | head -1 | grep -oE '[0-9.]+')
+            BRANCH_RATE=$(grep -oE 'branch-rate="[0-9.]+"' "$COBERTURA" | head -1 | grep -oE '[0-9.]+')
+            COV_LINES=$(awk -v r="$LINE_RATE" 'BEGIN{printf "%.1f%%", r*100}')
+            COV_BRANCH=$(awk -v r="$BRANCH_RATE" 'BEGIN{printf "%.1f%%", r*100}')
+          else
+            COV_LINES="—"
+            COV_BRANCH="—"
+          fi
+          # Test count : compte les [Fact] et [Theory] recursivement dans tests/.
+          TEST_COUNT=$(find tests -name '*.cs' -exec grep -lE '\[(Fact|Theory)\]' {} \; | xargs -I{} grep -cE '^\s*\[(Fact|Theory)\]' {} 2>/dev/null | awk '{s+=$1} END{print s}')
+          # Lines of C# (tres approximatif).
+          LOC=$(find src/ -name '*.cs' -exec cat {} + 2>/dev/null | wc -l | tr -d ' ')
+          LOC_FMT=$(printf "%'d" "$LOC" | tr ',' ' ')
+          # Build metadata
+          BUILD_SHA="${GITHUB_SHA:0:7}"
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+
+          echo "Stats injectees :"
+          echo "  RULE_COUNT=$RULE_COUNT"
+          echo "  AUTO_FIX_COUNT=$AUTO_FIX_COUNT"
+          echo "  COV_LINES=$COV_LINES"
+          echo "  COV_BRANCH=$COV_BRANCH"
+          echo "  TEST_COUNT=$TEST_COUNT"
+          echo "  LOC=$LOC_FMT"
+
+          # sed-replace les placeholders dans _site/index.html.
+          sed -i "s|>29<|>$RULE_COUNT<|g" _site/index.html
+          sed -i "s|19 auto-fixables|$AUTO_FIX_COUNT auto-fixables|g" _site/index.html
+          sed -i "s|>86\.6%<|>$COV_LINES<|g" _site/index.html
+          sed -i "s|>77\.6%<|>$COV_BRANCH<|g" _site/index.html
+          sed -i "s|430+ tests|$TEST_COUNT tests|g" _site/index.html
+          sed -i "s|~5 000|~$LOC_FMT|g" _site/index.html
+          sed -i "s|>main<|>$BUILD_SHA<|g" _site/index.html
+          sed -i "s|>—</span></span>$|>$BUILD_DATE</span></span>|g" _site/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -195,7 +256,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: coverage-html
+          path: _site
 
       - name: Deploy to Pages
         id: deployment
