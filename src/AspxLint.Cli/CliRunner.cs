@@ -340,9 +340,10 @@ public static class CliRunner
 
         var config = AspxLintConfig.LoadFromOrAbove(path);
         var useColor = SupportsColor(stdout);
+        var cache = new ProjectScanner.IncrementalCache();
 
-        // Snapshot initial.
-        var current = ProjectScanner.ScanParallel(path, RuleRegistry.All, config: config);
+        // Snapshot initial (rempli le cache).
+        var (current, reanalyzed0) = ProjectScanner.ScanIncremental(path, RuleRegistry.All, cache, config: config);
         var totalIssues = current.Sum(f => f.Issues.Count);
         stdout.WriteLine($"aspx-lint watch — {current.Count} fichier(s), {totalIssues} probleme(s).");
         stdout.WriteLine($"Surveille : {Path.GetFullPath(path)}  (Ctrl+C pour arreter)");
@@ -396,7 +397,7 @@ public static class CliRunner
 
             try
             {
-                var next = ProjectScanner.ScanParallel(path, RuleRegistry.All, config: config);
+                var (next, reanalyzed) = ProjectScanner.ScanIncremental(path, RuleRegistry.All, cache, config: config);
                 var nextSet = next.SelectMany(f => f.Issues.Select(i => (f.RelativePath, i))).ToHashSet();
                 var added = nextSet.Where(p => !prevIssues.Contains(p)).ToList();
                 var removed = prevIssues.Where(p => !nextSet.Contains(p)).ToList();
@@ -405,13 +406,13 @@ public static class CliRunner
 
                 if (added.Count == 0 && removed.Count == 0)
                 {
-                    stdout.WriteLine($"[{stamp}] re-scan — pas de changement ({nextTotal} issues).");
+                    stdout.WriteLine($"[{stamp}] re-scan ({reanalyzed} fichier(s) re-analyses) — pas de changement ({nextTotal} issues).");
                 }
                 else
                 {
                     var addS = added.Count > 0 ? Color($"+{added.Count}", "31", useColor) : "";
                     var remS = removed.Count > 0 ? Color($"-{removed.Count}", "32", useColor) : "";
-                    stdout.WriteLine($"[{stamp}] {addS} {remS}  total {nextTotal}");
+                    stdout.WriteLine($"[{stamp}] {addS} {remS}  total {nextTotal} ({reanalyzed} re-analyses)");
                     foreach (var (rel, i) in added.Take(10))
                         stdout.WriteLine($"  {Color("+", "31", useColor)} {rel}:{i.Line}:{i.Col} [{i.RuleId}] {i.Hint}");
                     foreach (var (rel, i) in removed.Take(10))

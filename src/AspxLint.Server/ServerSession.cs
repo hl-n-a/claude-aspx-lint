@@ -69,4 +69,51 @@ public sealed class ServerSession
         var line = $"{DateTime.UtcNow:O} {BuildId} {level,-5} {msg}";
         lock (_logLock) File.AppendAllText(LogFile, line + Environment.NewLine);
     }
+
+    /// <summary>
+    /// Subscribers SSE actuellement connectes a /api/events. Chaque element
+    /// est un canal qui sert a envoyer des events texte au client.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, System.Threading.Channels.Channel<string>> _eventSubscribers = new();
+
+    public Guid SubscribeToEvents(System.Threading.Channels.Channel<string> channel)
+    {
+        var id = Guid.NewGuid();
+        _eventSubscribers[id] = channel;
+        return id;
+    }
+
+    public void UnsubscribeFromEvents(Guid id)
+    {
+        if (_eventSubscribers.TryRemove(id, out var ch))
+        {
+            try { ch.Writer.TryComplete(); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Diffuse un event a tous les abonnes SSE. Le format est celui du wire
+    /// SSE : "data: {json}\n\n". Chaque subscriber recoit une copie via son
+    /// channel ; les channels saturent ne bloquent pas (drop-newest).
+    /// </summary>
+    public void BroadcastEvent(string kind, object? payload = null)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new { kind, payload, ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+        var formatted = $"data: {json}\n\n";
+        foreach (var (id, ch) in _eventSubscribers)
+        {
+            try
+            {
+                if (!ch.Writer.TryWrite(formatted))
+                {
+                    // Channel sature : on drop. Si ca persiste, l'abonne sera
+                    // ferme par un timeout cote endpoint.
+                }
+            }
+            catch
+            {
+                _eventSubscribers.TryRemove(id, out _);
+            }
+        }
+    }
 }

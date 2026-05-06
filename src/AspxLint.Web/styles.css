@@ -549,12 +549,27 @@
     justify-content: flex-end;
   }
 
-  .code-area {
+  .code-area-wrap {
     flex: 1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    overflow: hidden;
+  }
+  .code-area {
     overflow: auto;
     background: var(--bg);
     position: relative;
+    min-width: 0;
   }
+  .code-minimap {
+    width: 80px;
+    background: var(--bg-2);
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    image-rendering: crisp-edges;
+  }
+  .code-minimap:hover { opacity: 0.95; }
   .code-empty {
     height: 100%;
     display: flex;

@@ -810,6 +810,7 @@ function renderCode() {
   area.innerHTML = html;
   attachIssueScrollSync();
   if (state.search.open && state.search.query) applySearchHighlights();
+  renderMinimap(file);
 }
 
 /**
@@ -978,6 +979,187 @@ function renderSplit(file) {
   `;
   attachIssueScrollSync();
   if (state.search.open && state.search.query) applySearchHighlights();
+  renderMinimap(file);
+}
+
+/* ============================================================
+   MINI-MAP — vignette compacte du fichier (style VSCode)
+   ============================================================
+   - 1 ligne source = 1 row de pixels (color = severite la plus elevee
+     ou gris neutre si propre)
+   - Rectangle "viewport" qui suit le scroll de codeArea
+   - Click ou drag pour scroller a une position
+   ============================================================ */
+
+const MINIMAP_LINE_HEIGHT = 2;   // px par ligne de code (compact)
+const MINIMAP_WIDTH = 80;
+let minimapDragging = false;
+
+function renderMinimap(file) {
+  const canvas = $('codeMinimap');
+  if (!canvas || !file) {
+    if (canvas) canvas.style.display = 'none';
+    return;
+  }
+  // En mode edit / split, on cache la minimap pour ne pas chevaucher l'overlay.
+  if (state.editMode || state.splitView) {
+    canvas.style.display = 'none';
+    return;
+  }
+  canvas.style.display = '';
+
+  const lines = file.current.split(/\r?\n/);
+  const issuesByLine = new Map();
+  for (const i of file.issues || []) {
+    const cur = issuesByLine.get(i.line);
+    const sevRank = i.severity === 'error' ? 3 : i.severity === 'warning' ? 2 : 1;
+    if (!cur || sevRank > cur) issuesByLine.set(i.line, sevRank);
+  }
+
+  const area = $('codeArea');
+  const visibleHeight = area ? area.clientHeight : 600;
+  // Hauteur du canvas = ce qu'on a, mais lisere si plus de lignes que de pixels.
+  const desiredHeight = Math.max(visibleHeight, lines.length * MINIMAP_LINE_HEIGHT);
+  canvas.height = desiredHeight;
+  canvas.width = MINIMAP_WIDTH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Map theme -> couleurs.
+  const css = getComputedStyle(document.documentElement);
+  const colorBg     = css.getPropertyValue('--bg-2').trim() || '#14150f';
+  const colorClean  = css.getPropertyValue('--text-faint').trim() || '#5a5a4f';
+  const colorInfo   = css.getPropertyValue('--info').trim() || '#6db4ff';
+  const colorWarn   = css.getPropertyValue('--warning').trim() || '#ffb84d';
+  const colorErr    = css.getPropertyValue('--error').trim() || '#ff5e5e';
+
+  ctx.fillStyle = colorBg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Dessine 1 row par ligne, longueur ~ proportionnelle a la longueur de la ligne.
+  for (let i = 0; i < lines.length; i++) {
+    const lineLen = lines[i].length;
+    const barLen = Math.min(MINIMAP_WIDTH - 6, Math.max(2, Math.round(lineLen / 2)));
+    const sev = issuesByLine.get(i + 1);
+    let color;
+    if (sev === 3) color = colorErr;
+    else if (sev === 2) color = colorWarn;
+    else if (sev === 1) color = colorInfo;
+    else color = colorClean;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = sev ? 0.95 : 0.18;
+    ctx.fillRect(3, i * MINIMAP_LINE_HEIGHT, barLen, Math.max(1, MINIMAP_LINE_HEIGHT - 0.5));
+  }
+  ctx.globalAlpha = 1;
+
+  // Viewport indicator (rectangle qui suit le scroll de codeArea).
+  drawMinimapViewport();
+
+  // Hook scroll listener pour repeindre le viewport.
+  if (!area._minimapHooked) {
+    area.addEventListener('scroll', drawMinimapViewport, { passive: true });
+    area._minimapHooked = true;
+  }
+  // Click / drag sur la minimap = scroll a la position.
+  if (!canvas._minimapClickHooked) {
+    canvas.addEventListener('mousedown', onMinimapMouse);
+    canvas.addEventListener('mousemove', onMinimapMouse);
+    canvas.addEventListener('mouseup',   () => { minimapDragging = false; });
+    canvas.addEventListener('mouseleave', () => { minimapDragging = false; });
+    canvas._minimapClickHooked = true;
+  }
+}
+
+function drawMinimapViewport() {
+  const canvas = $('codeMinimap');
+  const area = $('codeArea');
+  if (!canvas || !area || canvas.style.display === 'none') return;
+
+  const ctx = canvas.getContext('2d');
+  // On evite de redessiner toute la minimap : on colle un overlay viewport
+  // dans un canvas dedie ou on utilise la composition. Pour simplicite,
+  // on redessine la minimap entiere (rapide : ~500 lignes max typique).
+  const file = currentFile();
+  if (!file) return;
+  // Re-dessiner les bars + viewport ensemble (cleaner).
+  // → on appelle renderMinimap mais avec un short-circuit pour eviter
+  //   de re-ajouter les listeners. En pratique on appelle juste paintViewport.
+  paintMinimapViewportOnly();
+}
+
+function paintMinimapViewportOnly() {
+  const canvas = $('codeMinimap');
+  const area = $('codeArea');
+  const file = currentFile();
+  if (!canvas || !area || !file) return;
+  const ctx = canvas.getContext('2d');
+
+  // On efface la zone du viewport precedent en redessinant la minimap.
+  // Pour eviter le flicker, on garde une "base" et on overlaye le viewport.
+  // Strategie simple : on conserve un OffscreenCanvas / cache, mais ici
+  // on se contente de redessiner via renderMinimap si pas de cache.
+  // Pour rester simple et performant : on dessine le viewport en composite.
+  const lines = file.current.split(/\r?\n/);
+  const totalH = lines.length * MINIMAP_LINE_HEIGHT;
+  const visibleRatio = area.clientHeight / Math.max(1, area.scrollHeight);
+  const top = (area.scrollTop / Math.max(1, area.scrollHeight)) * totalH;
+  const h = Math.max(20, visibleRatio * totalH);
+
+  // Mode "redessine la base puis overlay" : peu cher sur ~500 lignes.
+  renderMinimapBase(ctx, canvas, lines, file.issues || []);
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.fillRect(0, top, canvas.width, h);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, top + 0.5, canvas.width - 1, h - 1);
+}
+
+function renderMinimapBase(ctx, canvas, lines, issues) {
+  const css = getComputedStyle(document.documentElement);
+  const colorBg     = css.getPropertyValue('--bg-2').trim() || '#14150f';
+  const colorClean  = css.getPropertyValue('--text-faint').trim() || '#5a5a4f';
+  const colorInfo   = css.getPropertyValue('--info').trim() || '#6db4ff';
+  const colorWarn   = css.getPropertyValue('--warning').trim() || '#ffb84d';
+  const colorErr    = css.getPropertyValue('--error').trim() || '#ff5e5e';
+
+  ctx.fillStyle = colorBg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const issuesByLine = new Map();
+  for (const i of issues) {
+    const cur = issuesByLine.get(i.line);
+    const sevRank = i.severity === 'error' ? 3 : i.severity === 'warning' ? 2 : 1;
+    if (!cur || sevRank > cur) issuesByLine.set(i.line, sevRank);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineLen = lines[i].length;
+    const barLen = Math.min(canvas.width - 6, Math.max(2, Math.round(lineLen / 2)));
+    const sev = issuesByLine.get(i + 1);
+    let color;
+    if (sev === 3) color = colorErr;
+    else if (sev === 2) color = colorWarn;
+    else if (sev === 1) color = colorInfo;
+    else color = colorClean;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = sev ? 0.95 : 0.18;
+    ctx.fillRect(3, i * MINIMAP_LINE_HEIGHT, barLen, Math.max(1, MINIMAP_LINE_HEIGHT - 0.5));
+  }
+  ctx.globalAlpha = 1;
+}
+
+function onMinimapMouse(e) {
+  if (e.type === 'mousedown') minimapDragging = true;
+  if (e.type === 'mousemove' && !minimapDragging) return;
+  const canvas = $('codeMinimap');
+  const area = $('codeArea');
+  if (!canvas || !area) return;
+  const rect = canvas.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  const ratio = y / canvas.height;
+  area.scrollTop = ratio * area.scrollHeight - area.clientHeight / 2;
 }
 
 /**
@@ -1116,6 +1298,7 @@ function renderDiff() {
   area.innerHTML = html;
   attachIssueScrollSync();
   if (state.search.open && state.search.query) applySearchHighlights();
+  renderMinimap(file);
 }
 
 /**
@@ -1548,6 +1731,32 @@ function currentFile() {
  *   - click simple    : focus le fichier (vue centrale) et reset la multi-selection
  * Sans evenement (appels programmatiques), comportement = click simple.
  */
+/* ============================================================
+   RECENTLY OPENED FILES — LRU persiste dans localStorage
+   ============================================================
+   Quand l'utilisateur ouvre un fichier, on push son nom dans une LRU
+   capee a 30 entrees. La palette Ctrl+P utilise cette liste pour proposer
+   les fichiers recemment vus en premier quand le query est vide.
+   ============================================================ */
+const RECENT_KEY = 'aspxlint.recent.v1';
+const RECENT_MAX = 30;
+
+function loadRecentFiles() {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function pushRecentFile(name) {
+  if (!name) return;
+  try {
+    let list = loadRecentFiles().filter(n => n !== name);
+    list.unshift(name);
+    if (list.length > RECENT_MAX) list = list.slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch { /* quota plein */ }
+}
+
 function selectFile(id, ev) {
   const ctrl = ev && (ev.ctrlKey || ev.metaKey);
   const shift = ev && ev.shiftKey;
@@ -1579,6 +1788,9 @@ function selectFile(id, ev) {
   state.viewMode = 'code';
   document.querySelectorAll('.filter-pill').forEach(p => p.classList.toggle('active', p.dataset.filter === 'all'));
   setVerifyStatus('idle', '⊙ aucune vérification');
+  // Track dans la liste LRU pour la palette
+  const file = state.files.find(f => f.id === id);
+  if (file) pushRecentFile(file.name);
   renderAll();
 }
 
@@ -2851,16 +3063,27 @@ function renderPalette() {
       .filter(c => !sub || c.name.toLowerCase().includes(sub))
       .map(c => ({ kind: 'cmd', cmd: c, label: c.name, icon: c.icon }));
   } else {
-    // Mode fichiers : substring case-insensitive sur le path
+    // Mode fichiers : substring case-insensitive sur le path. Quand le query
+    // est vide, on trie par "recently opened" (LRU en localStorage) pour
+    // proposer en premier ce que l'utilisateur a vu recemment.
     const sub = q.toLowerCase();
-    items = state.files
-      .filter(f => !sub || (f.name || '').toLowerCase().includes(sub))
-      .slice(0, 100)
-      .map(f => {
-        const status = computeFileStatus(f);
-        const dot = `<span class="palette-dot ${status}"></span>`;
-        return { kind: 'file', file: f, label: f.name, html: dot };
+    let candidates = state.files.filter(f => !sub || (f.name || '').toLowerCase().includes(sub));
+    if (!sub) {
+      const recent = loadRecentFiles();
+      const recentIdx = new Map(recent.map((name, i) => [name, i]));
+      candidates.sort((a, b) => {
+        const ai = recentIdx.has(a.name) ? recentIdx.get(a.name) : Number.MAX_SAFE_INTEGER;
+        const bi = recentIdx.has(b.name) ? recentIdx.get(b.name) : Number.MAX_SAFE_INTEGER;
+        if (ai !== bi) return ai - bi;
+        return a.name.localeCompare(b.name);
       });
+    }
+    items = candidates.slice(0, 100).map(f => {
+      const status = computeFileStatus(f);
+      const dot = `<span class="palette-dot ${status}"></span>`;
+      const recent = !sub && loadRecentFiles().includes(f.name);
+      return { kind: 'file', file: f, label: f.name, html: dot, recent };
+    });
   }
   paletteState.items = items;
   if (paletteState.selected >= items.length) paletteState.selected = Math.max(0, items.length - 1);
@@ -2874,7 +3097,7 @@ function renderPalette() {
     <div class="palette-item ${i === paletteState.selected ? 'selected' : ''}" data-index="${i}" onclick="runPaletteItem(${i})" onmouseenter="paletteHover(${i})">
       ${it.icon ? `<span class="palette-icon">${it.icon}</span>` : (it.html || '')}
       <span class="palette-label">${highlightSearchInPalette(it.label, q.startsWith('>') ? q.slice(1).trim() : q)}</span>
-      <span class="palette-kind">${it.kind === 'cmd' ? 'commande' : ''}</span>
+      <span class="palette-kind">${it.kind === 'cmd' ? 'commande' : (it.recent ? '⏱ récent' : '')}</span>
     </div>
   `).join('');
   // Scroll the selected item into view.
@@ -3181,6 +3404,48 @@ async function onDesktopFileChanges(paths) {
   }
 }
 
+/* ============================================================
+   SSE — abonnement aux evenements serveur
+   ============================================================
+   /api/events est un flux text/event-stream qui pousse les events
+   `fileSaved`, `scanned`, etc. Si plusieurs onglets sont ouverts sur
+   la meme dashboard, ils voient les mises a jour des autres en
+   temps reel (utile aussi pour pairing telephone+desktop).
+   ============================================================ */
+
+let _sseSource = null;
+
+function connectSse() {
+  if (_sseSource) return;
+  try {
+    _sseSource = new EventSource('/api/events');
+    _sseSource.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      onSseEvent(msg);
+    };
+    _sseSource.onerror = () => {
+      // EventSource gere le retry automatiquement (selon le retry: hint).
+      // On laisse faire silencieusement.
+    };
+  } catch { /* navigateur sans EventSource */ }
+}
+
+function onSseEvent(msg) {
+  if (!msg || !msg.kind) return;
+  if (msg.kind === 'fileSaved' && msg.payload) {
+    // Un autre client a sauve ce fichier -> on rafraichit le notre s'il est charge.
+    const p = msg.payload.path;
+    const file = state.files.find(f => f.serverPath && f.serverPath.toLowerCase() === (p || '').toLowerCase());
+    if (file) {
+      onDesktopFileChanges([p]);   // reuse le bridge handler qui re-read + re-analyse
+    }
+  } else if (msg.kind === 'scanned' && msg.payload) {
+    // Pas d'action automatique — on pourrait afficher un toast discret.
+    // showToast(`Scan distant : ${msg.payload.fileCount} fichier(s).`, 'success');
+  }
+}
+
 // Bootstrap : on load les regles depuis /api/rules, puis on rend l'UI.
 // La dashboard tourne toujours derriere AspxLint.Server (file:// bloque tout
 // au debut du script).
@@ -3191,4 +3456,5 @@ async function onDesktopFileChanges(paths) {
   await loadRulesFromServer();
   if (persistEnabled) await maybeRestoreFromStorage();
   renderAll();
+  connectSse();
 })();

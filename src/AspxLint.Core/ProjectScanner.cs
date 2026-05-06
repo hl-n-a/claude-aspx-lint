@@ -70,6 +70,89 @@ public static class ProjectScanner
         return bag.OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>
+    /// Cache par hash pour le scan incremental. Cle = path absolu, valeur =
+    /// (hash du contenu, ScannedFile cache). Au prochain scan, si le hash
+    /// du fichier sur disque correspond a celui en cache, on retourne le
+    /// ScannedFile cache au lieu de relancer Detect sur toutes les regles.
+    /// </summary>
+    public sealed class IncrementalCache
+    {
+        internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Hash, ScannedFile File)> _entries = new();
+        public int Count => _entries.Count;
+        public void Clear() => _entries.Clear();
+    }
+
+    /// <summary>
+    /// Scan parallele incremental : ne re-analyse que les fichiers dont le
+    /// contenu a change depuis le dernier scan. Necessite un IncrementalCache
+    /// que l'appelant garde entre les passes (typiquement le watch mode).
+    /// Renvoie aussi le nombre de fichiers re-analyses (pour les logs).
+    /// </summary>
+    public static (IReadOnlyList<ScannedFile> Files, int Reanalyzed) ScanIncremental(
+        string root,
+        IEnumerable<IRule> rules,
+        IncrementalCache cache,
+        IEnumerable<string>? extensions = null,
+        AspxLintConfig? config = null,
+        int? maxDegreeOfParallelism = null)
+    {
+        var (paths, exts, rulesList) = PrepareScan(root, rules, extensions, config);
+        var pathList = paths.ToList();
+        var bag = new ConcurrentBag<ScannedFile>();
+        int reanalyzed = 0;
+
+        var po = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = maxDegreeOfParallelism ?? Environment.ProcessorCount
+        };
+
+        Parallel.ForEach(pathList, po, path =>
+        {
+            var rel = Path.GetRelativePath(root, path);
+            if (config != null && config.IsIgnored(rel)) return;
+
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(path); }
+            catch { return; }
+
+            // Hash SHA1 du contenu brut. Suffit pour comparer (collisions ignorables).
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(bytes));
+
+            if (cache._entries.TryGetValue(path, out var cached) && cached.Hash == hash)
+            {
+                // Hash inchange : on reutilise le ScannedFile precedent.
+                bag.Add(cached.File);
+                return;
+            }
+
+            // Decode le BOM-aware comme dans AnalyzeOne (mais on a deja les bytes).
+            var hasBom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            var content = hasBom
+                ? "﻿" + System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3)
+                : System.Text.Encoding.UTF8.GetString(bytes);
+
+            var issues = Analyzer.Analyze(path, content, rulesList, config);
+            var lineCount = 1;
+            foreach (var c in content) if (c == '\n') lineCount++;
+            var sf = new ScannedFile(path, rel, lineCount, content, issues);
+
+            cache._entries[path] = (hash, sf);
+            bag.Add(sf);
+            System.Threading.Interlocked.Increment(ref reanalyzed);
+        });
+
+        // Nettoie le cache des fichiers qui n'existent plus (deletes).
+        var alive = pathList.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in cache._entries.Keys)
+        {
+            if (!alive.Contains(key)) cache._entries.TryRemove(key, out _);
+        }
+
+        var ordered = bag.OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
+        return (ordered, reanalyzed);
+    }
+
     private static (IEnumerable<string> Paths, HashSet<string> Exts, List<IRule> Rules)
         PrepareScan(string root, IEnumerable<IRule> rules, IEnumerable<string>? extensions, AspxLintConfig? config)
     {

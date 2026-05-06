@@ -181,6 +181,53 @@ public static class ServerHost
 
         app.MapGet("/healthz", () => Results.Ok(new { ok = true, buildId = session.BuildId }));
 
+        // Server-Sent Events : flux longue duree qui pousse les changements
+        // (file save, scan, fix) a tous les clients connectes. Permet a
+        // plusieurs onglets / appareils de voir les mises a jour en temps reel.
+        app.MapGet("/api/events", async (HttpContext ctx) =>
+        {
+            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.Headers["Cache-Control"] = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";   // disable proxy buffering
+            await ctx.Response.WriteAsync("retry: 5000\n\n");   // hint browser
+            await ctx.Response.Body.FlushAsync();
+
+            var channel = System.Threading.Channels.Channel.CreateBounded<string>(
+                new System.Threading.Channels.BoundedChannelOptions(64)
+                {
+                    FullMode = System.Threading.Channels.BoundedChannelFullMode.DropOldest
+                });
+            var subId = session.SubscribeToEvents(channel);
+            session.Log("INFO", $"SSE client connected ({subId})");
+
+            try
+            {
+                // Heartbeat toutes les 30 s pour eviter les coupures de proxy.
+                using var cts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+                _ = Task.Run(async () =>
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        await Task.Delay(30_000, cts.Token).ContinueWith(_ => { });
+                        if (cts.IsCancellationRequested) return;
+                        try { channel.Writer.TryWrite(": heartbeat\n\n"); } catch { }
+                    }
+                }, cts.Token);
+
+                await foreach (var ev in channel.Reader.ReadAllAsync(ctx.RequestAborted))
+                {
+                    await ctx.Response.WriteAsync(ev, ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }
+            }
+            catch (OperationCanceledException) { /* client gone */ }
+            finally
+            {
+                session.UnsubscribeFromEvents(subId);
+                session.Log("INFO", $"SSE client disconnected ({subId})");
+            }
+        });
+
         app.MapGet("/", async (HttpContext ctx) =>
         {
             session.Log("INFO", $"dashboard served to {ctx.Connection.RemoteIpAddress}");
@@ -562,6 +609,7 @@ public static class ServerHost
                     session.AddWritable(Path.GetFullPath(f.AbsolutePath));
 
                 session.Log("INFO", $"scan done path={req.Path} files={files.Count} issues={totalIssues}");
+                session.BroadcastEvent("scanned", new { path = req.Path, fileCount = files.Count, issueCount = totalIssues });
 
                 return Results.Ok(new
                 {
@@ -626,6 +674,7 @@ public static class ServerHost
                 File.WriteAllBytes(full, bytes);
 
                 session.Log("INFO", $"saved path={full} bytes={bytes.Length} backup={backedUp}");
+                session.BroadcastEvent("fileSaved", new { path = full, bytes = bytes.Length });
                 return Results.Ok(new { ok = true, path = full, bytes = bytes.Length, backedUp });
             }
             catch (Exception ex)

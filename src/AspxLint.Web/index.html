@@ -119,12 +119,15 @@
         <button class="btn small" onclick="replaceCurrent()">Remplacer</button>
         <button class="btn small primary" onclick="replaceAll()">Tout remplacer</button>
       </div>
-      <div class="code-area" id="codeArea">
-        <div class="code-empty">
-          <div class="code-empty-headline">Une analyse soignée pour vos pages serveurs.</div>
-          <div class="code-empty-sub">Chargez vos fichiers ASPX, ASCX ou MASTER. L'outil détectera les problèmes de formatage, expliquera chaque cas, proposera des corrections, puis revérifiera tout après application.</div>
-          <div class="code-empty-hint">Les fichiers ne quittent jamais votre navigateur — analyse 100% locale.</div>
+      <div class="code-area-wrap">
+        <div class="code-area" id="codeArea">
+          <div class="code-empty">
+            <div class="code-empty-headline">Une analyse soignée pour vos pages serveurs.</div>
+            <div class="code-empty-sub">Chargez vos fichiers ASPX, ASCX ou MASTER. L'outil détectera les problèmes de formatage, expliquera chaque cas, proposera des corrections, puis revérifiera tout après application.</div>
+            <div class="code-empty-hint">Les fichiers ne quittent jamais votre navigateur — analyse 100% locale.</div>
+          </div>
         </div>
+        <canvas class="code-minimap" id="codeMinimap" width="80" height="600" title="Mini-carte du fichier"></canvas>
       </div>
     </section>
 
