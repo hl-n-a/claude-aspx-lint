@@ -7,8 +7,12 @@
 [![Coverage report](https://img.shields.io/badge/coverage-browse-d4ff3a)](https://hl-n-a.github.io/claude-aspx-lint/)
 
 Linter et auto-fixer pour fichiers **ASP.NET Web Forms** (`.aspx`, `.ascx`,
-`.master`, `.asax`). 23 règles couvrant directives de page, balises XHTML,
-contrôles serveur, indentation, encodage, sécurité ViewState.
+`.master`, `.asax`). 29 règles couvrant directives de page, balises XHTML,
+contrôles serveur, indentation, encodage, sécurité (ViewState, tabnabbing,
+URLs locales), accessibilité (alt manquant), et code smells (style inline,
+handlers JS inline). Scan parallèle (~0.7s sur 350 fichiers), config par
+projet (`.aspxlintrc.json`), disable inline par commentaire, watch mode,
+hook pre-commit, intégration GitHub Actions avec annotations PR.
 
 Trois manières de l'utiliser :
 
@@ -31,15 +35,54 @@ dotnet tool install --global aspx-lint
 ### Usage
 
 ```bash
-aspx-lint scan ./MyWebFormsProject                    # rapport texte
+aspx-lint scan ./MyWebFormsProject                    # rapport texte (couleurs ANSI)
 aspx-lint scan ./MyWebFormsProject --json             # JSON pour pipeline
 aspx-lint scan ./MyWebFormsProject --sarif            # SARIF pour Code Scanning
 aspx-lint scan . --severity error                     # filtre niveau
+aspx-lint scan . --quiet                              # juste la ligne summary
+aspx-lint scan . --no-color                           # désactive ANSI
 
 aspx-lint fix  ./MyWebFormsProject --dry-run          # voir ce qui serait corrigé
 aspx-lint fix  ./MyWebFormsProject                    # appliquer
 aspx-lint fix  . --rule WS-001                        # une seule règle
+
+aspx-lint watch ./MyWebFormsProject                   # re-lint live (FileSystemWatcher)
+aspx-lint init                                        # génère .aspxlintrc.json
+aspx-lint init --with-hook                            # + .git/hooks/pre-commit
+aspx-lint pre-commit --severity error                 # lint juste les fichiers staged
 ```
+
+### Configuration projet (`.aspxlintrc.json`)
+
+```bash
+aspx-lint init           # génère le template, toutes les règles commentées
+```
+
+```json
+{
+  "ignore": ["**/bin/**", "**/Generated/**"],
+  "rules": {
+    "TAG-003": "off",          // désactive complètement
+    "CHAR-001": "info",        // change la sévérité (error/warning/info/off)
+    "STYLE-001": "off"         // souvent légitime dans les templates email
+  }
+}
+```
+
+Les commentaires JSON et les virgules trailing sont tolérés.
+
+### Disable inline
+
+```aspx
+<%-- aspx-lint disable TAG-003 --%>
+<div>... ligne suivante ignorée pour TAG-003 ...</div>
+
+<%-- aspx-lint disable TAG-003,ATTR-002 --%>     <!-- plusieurs règles -->
+<%-- aspx-lint disable-file TAG-003 --%>         <!-- toute la suite du fichier -->
+<%-- aspx-lint disable-file --%>                 <!-- toutes règles, fichier entier -->
+```
+
+Aussi reconnu dans des `<!-- aspx-lint disable ... -->` HTML.
 
 Codes de sortie :
 - `0` ok (scan clean / fix appliqué)
@@ -102,12 +145,15 @@ Le serveur expose un contrat REST consommé par tous les frontends (Web
 dashboard, Desktop, futures extensions Chrome/VS) :
 
 ```
-GET  /                  → dashboard HTML
+GET  /                  → dashboard HTML (CSS/JS/partials inlinés)
 GET  /healthz           → no auth, healthcheck
-GET  /api/rules         → liste des 23 règles (id, name, severity, hasFix)
+GET  /api/rules         → liste des 29 règles (id, name, severity, hasFix)
+GET  /api/browse?path=  → liste les sous-dossiers (folder explorer dashboard)
+GET  /api/find-folder?name= → BFS pour drag-and-drop folder
 POST /api/scan          → scan récursif d'un dossier (path → issues + content)
 POST /api/analyze       → analyse d'un contenu inline (content + ext)
-POST /api/fix           → applique un fix d'une règle (content + ext + ruleId)
+POST /api/fix           → applique un fix d'une règle (toutes les occurrences)
+POST /api/fix-one       → applique un fix sur une ligne précise (per-occurrence)
 POST /api/fix-all       → applique tous les fixes auto-fixables
 POST /api/save          → écrit sur disque (allowlist + .bak)
 POST /api/restore       → restaure depuis .bak
@@ -197,17 +243,17 @@ Dans les deux cas :
 
 ---
 
-## Règles (23 au total)
+## Règles (29 au total)
 
 | ID | Catégorie | Sévérité | Auto-fix |
 |---|---|---|---|
 | DIR-001 | Directive `@Page`/`@Control`/`@Master` | error | ✓ |
 | TAG-001 | Balise auto-fermante non XHTML (`<br>` → `<br />`) | warning | ✓ |
 | TAG-002 | Casse incohérente des balises HTML | warning | ✓ |
-| TAG-003 | Balises non équilibrées | error | — |
+| TAG-003 | Balises non équilibrées (insère les `</tag>` manquants) | error | ✓ |
 | ATTR-001 | Attribut sans guillemets | warning | ✓ |
 | ATTR-002 | `attr='val'` (simple quote) → double | info | ✓ |
-| ATTR-003 | Attribut dupliqué | error | — |
+| ATTR-003 | Attribut dupliqué (merge `class`, garde 1er ailleurs) | error | ✓ |
 | ASP-001 | `<asp:...>` sans `runat="server"` | error | ✓ |
 | ASP-002 | ID de contrôle dupliqué | error | — |
 | ASP-003 | `ContentPlaceHolder` sans ID | error | — |
@@ -218,14 +264,20 @@ Dans les deux cas :
 | WS-003 | Plus de 2 lignes vides consécutives | info | ✓ |
 | WS-004 | Pas de `\n` final | info | ✓ |
 | WS-005 | BOM UTF-8 en début de fichier | warning | ✓ |
-| CHAR-001 | `&` non échappé | warning | — |
+| WS-006 | Lignes vides en fin de fichier | info | ✓ |
+| CHAR-001 | `&` non échappé (skip URLs) | warning | — |
 | COM-001 | `--` à l'intérieur de `<!-- -->` | warning | — |
 | SEC-001 | `EnableViewStateMac="false"` | error | ✓ |
+| SEC-002 | `target="_blank"` sans `rel="noopener"` (tabnabbing) | warning | ✓ |
+| SEC-003 | URL hardcodée vers localhost / `*.local` / port | warning | — |
+| A11Y-001 | `<img>` sans `alt` (accessibilité) | warning | — |
+| STYLE-001 | `style="..."` inline (anti-pattern) | info | — |
+| SCRIPT-001 | Handler JS inline (`onclick=`, `onload=`, …) | info | — |
 | DOC-001 | DOCTYPE manquant (ASPX standalone) | warning | ✓ |
 | FORM-001 | `<form>` sans `runat="server"` | error | ✓ |
 | SM-001 | Plusieurs `<asp:ScriptManager>` | error | — |
 
-**15 règles auto-fixables, 8 manuelles** (renommages, restructurations).
+**19 règles auto-fixables, 10 manuelles** (renommages, restructurations, jugement humain).
 
 ---
 
@@ -233,7 +285,7 @@ Dans les deux cas :
 
 ```bash
 dotnet build
-dotnet test                                     # 300 tests, ~8 s
+dotnet test                                     # ~390 tests, < 5 s
 dotnet run --project src/AspxLint.Cli -- scan tests/fixtures
 ```
 

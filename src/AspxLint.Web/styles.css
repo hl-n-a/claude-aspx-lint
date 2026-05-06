@@ -197,6 +197,21 @@
   .stat.warning .stat-dot { background: var(--warning); }
   .stat.info .stat-dot { background: var(--info); }
   .stat.success .stat-dot { background: var(--success); }
+
+  /* Trend pill (variation du nb total d'issues, persistance opt-in requise) */
+  .stat.trend {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    gap: 4px;
+  }
+  .stat.trend.down { color: var(--success); border-color: var(--success); }
+  .stat.trend.up   { color: var(--error);   border-color: var(--error); }
+  .stat.trend.flat { color: var(--text-faint); }
+  .stat.trend .trend-arrow { font-weight: 700; }
   .stat-num {
     font-weight: 600;
     color: var(--text);

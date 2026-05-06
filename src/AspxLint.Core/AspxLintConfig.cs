@@ -42,7 +42,12 @@ public sealed class AspxLintConfig
                 {
                     var json = File.ReadAllText(f);
                     return JsonSerializer.Deserialize<AspxLintConfig>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true,
+                            ReadCommentHandling = JsonCommentHandling.Skip,
+                            AllowTrailingCommas = true
+                        })
                         ?? new AspxLintConfig();
                 }
                 dir = dir.Parent;

@@ -39,6 +39,8 @@ public static class CliRunner
                 "scan"        => await ScanAsync(args[1..], stdout, stderr),
                 "fix"         => await FixAsync(args[1..], stdout, stderr),
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
+                "watch"       => await WatchAsync(args[1..], stdout, stderr),
+                "init"        => await InitAsync(args[1..], stdout, stderr),
                 _             => UnknownCommand(args[0], stderr),
             };
         }
@@ -243,16 +245,253 @@ public static class CliRunner
         o.WriteLine("Usage:");
         o.WriteLine("  aspx-lint scan <path> [--json | --sarif] [--severity error|warning|info] [--quiet] [--no-color]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
+        o.WriteLine("  aspx-lint watch <path> [--severity error|warning|info]");
+        o.WriteLine("  aspx-lint init [--with-hook]");
         o.WriteLine("  aspx-lint pre-commit [--severity error|warning|info]");
         o.WriteLine("  aspx-lint --version | --help");
         o.WriteLine();
-        o.WriteLine("pre-commit : ne lint que les fichiers ASPX/ASCX/MASTER staged dans git.");
-        o.WriteLine("              A cabler dans .git/hooks/pre-commit.");
+        o.WriteLine("watch       : re-lint a chaque modification de fichier (Ctrl+C pour arreter).");
+        o.WriteLine("init        : genere .aspxlintrc.json (et optionnellement .git/hooks/pre-commit).");
+        o.WriteLine("pre-commit  : ne lint que les fichiers staged dans git.");
         o.WriteLine();
         o.WriteLine("Codes de sortie :");
         o.WriteLine("  0  ok (scan sans probleme, ou fix applique)");
         o.WriteLine("  1  scan a trouve au moins un probleme, ou usage incorrect");
         o.WriteLine("  2  erreur d'execution (path absent, IO echouee, etc.)");
+    }
+
+    /// <summary>
+    /// Watch mode : re-scan le path a chaque modification d'un fichier ASPX/
+    /// ASCX/MASTER/ASAX. Compare avec la passe precedente et affiche le delta
+    /// (issues ajoutees / resolues) plutot qu'un dump complet.
+    /// </summary>
+    private static async Task<int> WatchAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        if (args.Length == 0)
+        {
+            stderr.WriteLine("Usage: aspx-lint watch <path> [--severity error|warning|info]");
+            return ExitIssuesFound;
+        }
+        var path = args[0];
+        Severity? minSev = null;
+        for (int i = 1; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--severity" when i + 1 < args.Length:
+                    if (!Enum.TryParse<Severity>(args[++i], ignoreCase: true, out var s))
+                    {
+                        stderr.WriteLine($"--severity invalide : {args[i]}");
+                        return ExitIssuesFound;
+                    }
+                    minSev = s;
+                    break;
+                default:
+                    stderr.WriteLine($"Argument inconnu : {args[i]}");
+                    return ExitIssuesFound;
+            }
+        }
+        if (!Directory.Exists(path))
+        {
+            stderr.WriteLine($"Dossier introuvable : {path}");
+            return ExitError;
+        }
+
+        var config = AspxLintConfig.LoadFromOrAbove(path);
+        var useColor = SupportsColor(stdout);
+
+        // Snapshot initial.
+        var current = ProjectScanner.ScanParallel(path, RuleRegistry.All, config: config);
+        var totalIssues = current.Sum(f => f.Issues.Count);
+        stdout.WriteLine($"aspx-lint watch — {current.Count} fichier(s), {totalIssues} probleme(s).");
+        stdout.WriteLine($"Surveille : {Path.GetFullPath(path)}  (Ctrl+C pour arreter)");
+
+        var prevIssues = current.SelectMany(f => f.Issues.Select(i => (f.RelativePath, i)))
+                                .ToHashSet();
+
+        using var watcher = new FileSystemWatcher(path)
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+        watcher.Filters.Add("*.aspx");
+        watcher.Filters.Add("*.ascx");
+        watcher.Filters.Add("*.master");
+        watcher.Filters.Add("*.asax");
+
+        // Coalesce les events : un seul changement peut declencher plusieurs
+        // events (size + lastWrite). On debounce 200 ms.
+        var trigger = new SemaphoreSlim(0, 1);
+        var lockObj = new object();
+        long lastEventTick = 0;
+        void Bump(object? _, FileSystemEventArgs __) {
+            lock (lockObj) lastEventTick = DateTime.UtcNow.Ticks;
+            trigger.Release();
+        }
+        watcher.Changed += Bump!;
+        watcher.Created += Bump!;
+        watcher.Deleted += Bump!;
+        watcher.Renamed += (s, e) => Bump(s, e);
+
+        // Loop infinie : on attend un event, debounce, re-scan, diff.
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (s, e) => { e.Cancel = true; cts.Cancel(); };
+        while (!cts.IsCancellationRequested)
+        {
+            try { await trigger.WaitAsync(cts.Token); }
+            catch (OperationCanceledException) { break; }
+
+            // Debounce : on attend 200 ms apres le dernier event observe.
+            while (true)
+            {
+                long lt; lock (lockObj) lt = lastEventTick;
+                var elapsed = (DateTime.UtcNow.Ticks - lt) / TimeSpan.TicksPerMillisecond;
+                if (elapsed >= 200) break;
+                await Task.Delay(200, cts.Token);
+            }
+            // Vide les events accumules pendant le debounce.
+            while (trigger.CurrentCount > 0) { try { await trigger.WaitAsync(0); } catch { break; } }
+
+            try
+            {
+                var next = ProjectScanner.ScanParallel(path, RuleRegistry.All, config: config);
+                var nextSet = next.SelectMany(f => f.Issues.Select(i => (f.RelativePath, i))).ToHashSet();
+                var added = nextSet.Where(p => !prevIssues.Contains(p)).ToList();
+                var removed = prevIssues.Where(p => !nextSet.Contains(p)).ToList();
+                var nextTotal = next.Sum(f => f.Issues.Count);
+                var stamp = DateTime.Now.ToString("HH:mm:ss");
+
+                if (added.Count == 0 && removed.Count == 0)
+                {
+                    stdout.WriteLine($"[{stamp}] re-scan — pas de changement ({nextTotal} issues).");
+                }
+                else
+                {
+                    var addS = added.Count > 0 ? Color($"+{added.Count}", "31", useColor) : "";
+                    var remS = removed.Count > 0 ? Color($"-{removed.Count}", "32", useColor) : "";
+                    stdout.WriteLine($"[{stamp}] {addS} {remS}  total {nextTotal}");
+                    foreach (var (rel, i) in added.Take(10))
+                        stdout.WriteLine($"  {Color("+", "31", useColor)} {rel}:{i.Line}:{i.Col} [{i.RuleId}] {i.Hint}");
+                    foreach (var (rel, i) in removed.Take(10))
+                        stdout.WriteLine($"  {Color("-", "32", useColor)} {rel}:{i.Line}:{i.Col} [{i.RuleId}]");
+                    if (added.Count + removed.Count > 20)
+                        stdout.WriteLine($"  ... ({added.Count + removed.Count - 20} de plus)");
+                }
+                prevIssues = nextSet;
+            }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"Erreur durant le scan : {ex.Message}");
+            }
+        }
+        stdout.WriteLine("aspx-lint watch arrete.");
+        return ExitOk;
+    }
+
+    private static string Color(string text, string ansiCode, bool useColor)
+    {
+        if (!useColor) return text;
+        var esc = ((char)27).ToString();
+        return $"{esc}[{ansiCode}m{text}{esc}[0m";
+    }
+
+    /// <summary>
+    /// Init : genere un .aspxlintrc.json template + optionnellement un hook
+    /// .git/hooks/pre-commit. Refuse d'ecraser un fichier existant sauf --force.
+    /// </summary>
+    private static async Task<int> InitAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        bool withHook = false;
+        bool force = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--with-hook": withHook = true; break;
+                case "--force": force = true; break;
+                default:
+                    stderr.WriteLine($"Argument inconnu : {args[i]}");
+                    return ExitIssuesFound;
+            }
+        }
+
+        var configPath = Path.Combine(Directory.GetCurrentDirectory(), ".aspxlintrc.json");
+        if (File.Exists(configPath) && !force)
+        {
+            stderr.WriteLine($"{configPath} existe deja. Utiliser --force pour l'ecraser.");
+            return ExitIssuesFound;
+        }
+
+        var template = BuildConfigTemplate();
+        await File.WriteAllTextAsync(configPath, template);
+        stdout.WriteLine($"OK : {configPath}");
+
+        if (withHook)
+        {
+            var hookDir = Path.Combine(Directory.GetCurrentDirectory(), ".git", "hooks");
+            if (!Directory.Exists(hookDir))
+            {
+                stderr.WriteLine("Pas de .git/hooks/ trouve. Es-tu dans un repo git ?");
+                return ExitOk;   // config OK, juste pas de hook
+            }
+            var hookPath = Path.Combine(hookDir, "pre-commit");
+            if (File.Exists(hookPath) && !force)
+            {
+                stderr.WriteLine($"{hookPath} existe deja. Utiliser --force pour l'ecraser.");
+                return ExitOk;
+            }
+            await File.WriteAllTextAsync(hookPath,
+                "#!/bin/sh\n" +
+                "# Genere par `aspx-lint init --with-hook`. Echoue le commit s'il y a au moins\n" +
+                "# une issue de severite error parmi les fichiers staged.\n" +
+                "exec aspx-lint pre-commit --severity error\n");
+            try
+            {
+                // Sur Unix, mettre executable.
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(hookPath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            }
+            catch { /* Win ou pas Unix — ignore */ }
+            stdout.WriteLine($"OK : {hookPath}");
+        }
+        return ExitOk;
+    }
+
+    private static string BuildConfigTemplate()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("{");
+        sb.AppendLine("  // Patterns d'ignore (* dans un segment, ** traverse les dossiers).");
+        sb.AppendLine("  \"ignore\": [");
+        sb.AppendLine("    \"**/bin/**\",");
+        sb.AppendLine("    \"**/obj/**\",");
+        sb.AppendLine("    \"**/Generated/**\"");
+        sb.AppendLine("  ],");
+        sb.AppendLine();
+        sb.AppendLine("  // Override de severite par regle. Valeurs : error, warning, info, off.");
+        sb.AppendLine("  // Decommente une ligne pour adapter le linter a ton projet.");
+        sb.AppendLine("  \"rules\": {");
+        var rulesByCategory = RuleRegistry.All
+            .OrderBy(r => r.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        for (int i = 0; i < rulesByCategory.Count; i++)
+        {
+            var r = rulesByCategory[i];
+            var defaultSev = r.Severity.ToString().ToLowerInvariant();
+            sb.AppendLine($"    // \"{r.Id}\": \"{defaultSev}\",   // {r.Name}");
+        }
+        // Termine sans virgule sur la derniere ligne (tolere par le JSON laxiste,
+        // mais on garde du JSON strict puisqu'on parse via System.Text.Json).
+        sb.AppendLine("  }");
+        sb.AppendLine("}");
+        // Note : System.Text.Json ne tolere pas les commentaires par defaut,
+        // mais avec ReadCommentHandling.Skip ils sont ignores. On l'active dans
+        // AspxLintConfig.LoadFromOrAbove pour que le template fonctionne tel quel.
+        return sb.ToString();
     }
 
     /// <summary>

@@ -41,6 +41,7 @@ public sealed record SaveRequest(string Path, string Content);
 public sealed record RestoreRequest(string Path);
 public sealed record AnalyzeRequest(string Content, string Ext);
 public sealed record FixRequest(string Content, string Ext, string RuleId);
+public sealed record FixOneRequest(string Content, string Ext, string RuleId, int Line);
 public sealed record FixAllRequest(string Content, string Ext);
 
 public static class ServerHost
@@ -244,6 +245,52 @@ public static class ServerHost
             {
                 content = fixedContent,
                 applied = Math.Max(0, beforeCount - afterCount)
+            });
+        });
+
+        // Fix per-occurrence : applique le fix de la regle UNIQUEMENT a la ligne
+        // donnee. Pour les rules line-local (TAG-001, ATTR-002, ASP-005, WS-001...)
+        // on extrait la ligne, on fait tourner Fix dessus, on recolle. Pour les
+        // rules file-level (WS-005 BOM, WS-004 final-newline, DOC-001...) il n'y a
+        // qu'une issue de toute facon, on tombe sur le fix complet.
+        app.MapPost("/api/fix-one", (FixOneRequest req) =>
+        {
+            var rule = RuleRegistry.All.FirstOrDefault(r =>
+                r.Id.Equals(req.RuleId, StringComparison.OrdinalIgnoreCase));
+            if (rule is null)
+                return Results.NotFound(new { error = $"Regle inconnue : {req.RuleId}" });
+            if (!rule.HasFix)
+                return Results.BadRequest(new { error = $"Regle {req.RuleId} n'a pas d'auto-fix" });
+
+            var ctx = new RuleContext((req.Ext ?? "").ToLowerInvariant(), "");
+            var content = req.Content ?? "";
+
+            // Strategie line-local : on extrait la ligne du conflit, on fait tourner
+            // Fix dessus en isolation, et on remplace dans le contenu.
+            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (req.Line < 1 || req.Line > lines.Length)
+                return Results.BadRequest(new { error = "Numero de ligne hors fichier." });
+
+            var idx = req.Line - 1;
+            var oneLine = lines[idx];
+            var fixedLine = rule.Fix(oneLine, ctx);
+            if (fixedLine != null && fixedLine != oneLine)
+            {
+                lines[idx] = fixedLine;
+                var rebuilt = string.Join("\n", lines);
+                // Si le contenu original utilisait \r\n, on tente de le preserver.
+                if (content.Contains("\r\n")) rebuilt = rebuilt.Replace("\n", "\r\n");
+                return Results.Ok(new { content = rebuilt, applied = 1, strategy = "line-local" });
+            }
+
+            // Fallback file-level : on applique le fix complet (couvre WS-005,
+            // WS-004, DOC-001, etc. — rules a une seule occurrence par fichier).
+            var fixedContent = rule.Fix(content, ctx) ?? content;
+            return Results.Ok(new
+            {
+                content = fixedContent,
+                applied = fixedContent != content ? 1 : 0,
+                strategy = "file-level"
             });
         });
 

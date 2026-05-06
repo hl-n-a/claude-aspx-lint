@@ -1227,7 +1227,8 @@ function renderIssues() {
       <div class="issue-snippet after">${escapeHtml(i.hint)}</div>
       ${i.fixable ? `
         <div class="issue-actions">
-          <button class="btn small primary" onclick="event.stopPropagation(); applySingleFix('${i.ruleId}')">⚡ Appliquer la correction</button>
+          <button class="btn small" onclick="event.stopPropagation(); applyFixHere('${i.ruleId}', ${i.line})" title="Corrige uniquement cette occurrence">⚡ Cette ligne</button>
+          <button class="btn small primary" onclick="event.stopPropagation(); applySingleFix('${i.ruleId}')" title="Corrige toutes les occurrences de cette règle dans le fichier">⚡ Tous (${i.ruleId})</button>
         </div>` : `
         <div class="issue-actions">
           <span style="font-size:11px;color:var(--text-faint);font-style:italic">Correction manuelle requise — voir explication ci-dessus.</span>
@@ -1261,6 +1262,94 @@ function renderStats() {
   $('statWarn').textContent = w;
   $('statInfo').textContent = n;
   $('statFixed').textContent = f;
+
+  // Tendance par rapport au dernier snapshot persiste (necessite "Persister" actif).
+  const total = e + w + n;
+  const trend = computeTrend(total);
+  const elt = $('statTrend');
+  if (!elt) return;
+  if (trend == null) {
+    elt.style.display = 'none';
+  } else {
+    elt.style.display = '';
+    elt.classList.remove('up', 'down', 'flat');
+    const arrow = elt.querySelector('.trend-arrow');
+    const num = elt.querySelector('.trend-num');
+    if (trend.delta < 0) {
+      elt.classList.add('down');
+      arrow.textContent = '↓';
+      num.textContent = `${trend.delta} (${trend.label})`;
+    } else if (trend.delta > 0) {
+      elt.classList.add('up');
+      arrow.textContent = '↑';
+      num.textContent = `+${trend.delta} (${trend.label})`;
+    } else {
+      elt.classList.add('flat');
+      arrow.textContent = '=';
+      num.textContent = `0 (${trend.label})`;
+    }
+  }
+}
+
+const TREND_HISTORY_KEY = 'aspxlint.history.v1';
+const TREND_MAX_ENTRIES = 50;
+
+function loadTrendHistory() {
+  if (!persistEnabled) return [];
+  try {
+    const raw = localStorage.getItem(TREND_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function appendTrendSnapshot(total) {
+  if (!persistEnabled) return;
+  try {
+    const hist = loadTrendHistory();
+    // Coalesce : si le dernier snapshot a moins de 30 secondes, on remplace
+    // au lieu d'ajouter (evite de saturer le storage avec 100 snapshots/min).
+    const now = Date.now();
+    if (hist.length > 0 && (now - hist[hist.length - 1].t) < 30_000) {
+      hist[hist.length - 1] = { t: now, total };
+    } else {
+      hist.push({ t: now, total });
+    }
+    while (hist.length > TREND_MAX_ENTRIES) hist.shift();
+    localStorage.setItem(TREND_HISTORY_KEY, JSON.stringify(hist));
+  } catch { /* quota plein */ }
+}
+
+/**
+ * Calcule la variation entre le total courant et un snapshot reference :
+ *   - le 1er snapshot du jour s'il existe (label "aujourd'hui")
+ *   - sinon le snapshot le plus ancien des dernieres 24h
+ *   - sinon le snapshot le plus ancien tout court
+ * Renvoie null si aucun historique ou persistance off.
+ */
+function computeTrend(currentTotal) {
+  if (!persistEnabled) return null;
+  const hist = loadTrendHistory();
+  // Append le current pour la prochaine fois.
+  appendTrendSnapshot(currentTotal);
+  if (hist.length === 0) return null;
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+
+  // Cherche le 1er snapshot du jour (apres minuit).
+  const todayFirst = hist.find(s => s.t >= startOfToday.getTime());
+  if (todayFirst) {
+    const delta = currentTotal - todayFirst.total;
+    return { delta, label: 'vs début de journée' };
+  }
+  // Sinon le plus ancien des dernieres 24h.
+  const within24 = hist.find(s => (now - s.t) <= dayMs);
+  if (within24) {
+    return { delta: currentTotal - within24.total, label: 'vs 24h' };
+  }
+  // Sinon le tout premier.
+  return { delta: currentTotal - hist[0].total, label: 'vs début' };
 }
 
 function renderAll() {
@@ -1368,6 +1457,61 @@ async function applySingleFix(ruleId) {
   } else {
     showToast('Aucun changement appliqué.', 'error');
   }
+}
+
+/** Per-occurrence fix : applique seulement a la ligne donnee via /api/fix-one. */
+async function applyFixHere(ruleId, line) {
+  const file = currentFile();
+  if (!file) return;
+  const ruleMeta = RULES.find(r => r.id === ruleId);
+  if (!ruleMeta || !ruleMeta.hasFix) {
+    showToast('Cette regle n\'a pas d\'auto-fix.', 'error');
+    return;
+  }
+
+  // Snapshot de l'issue ciblee pour l'historique avant que runAnalysis recharge.
+  const targetIssue = file.issues.find(i => i.ruleId === ruleId && i.line === line);
+
+  let data;
+  try {
+    const r = await fetch('/api/fix-one', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: file.current, ext: file.ext, ruleId, line })
+    });
+    if (!r.ok) {
+      showToast(`Fix KO (${r.status}).`, 'error');
+      return;
+    }
+    data = await r.json();
+  } catch (e) {
+    showToast('Fix échoué : ' + e.message, 'error');
+    return;
+  }
+
+  if (data.applied === 0 || data.content === file.current) {
+    showToast('Aucun changement applique a cette ligne.', 'error');
+    return;
+  }
+
+  file.current = data.content;
+  await runAnalysis(file);
+  if (targetIssue) {
+    file.history.push({
+      ruleId: ruleMeta.id,
+      ruleName: ruleMeta.name,
+      severity: ruleMeta.severity,
+      desc: ruleMeta.desc,
+      line: targetIssue.line,
+      col: targetIssue.col,
+      snippet: targetIssue.snippet,
+      hint: targetIssue.hint,
+      fixedAt: Date.now()
+    });
+  }
+  showToast(`Correction appliquée a L${line} (${data.strategy}).`, 'success');
+  setVerifyStatus('idle', '⊙ revérification disponible');
+  renderAll();
 }
 
 async function fixAllInCurrent() {

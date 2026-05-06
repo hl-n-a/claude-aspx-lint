@@ -25,6 +25,9 @@
       <span class="stat warning"><span class="stat-dot"></span>Avertissements <span class="stat-num" id="statWarn">0</span></span>
       <span class="stat info"><span class="stat-dot"></span>Infos <span class="stat-num" id="statInfo">0</span></span>
       <span class="stat success"><span class="stat-dot"></span>Corrigés <span class="stat-num" id="statFixed">0</span></span>
+      <span class="stat trend" id="statTrend" style="display:none" title="Variation du nombre total d'issues vs le dernier scan persisté">
+        <span class="trend-arrow"></span><span class="trend-num"></span>
+      </span>
       <label class="persist-toggle" title="Sauvegarder l'état entre les rechargements (localStorage du navigateur uniquement, pas envoyé au serveur)">
         <input type="checkbox" id="persistToggle" onchange="togglePersist(this.checked)" />
         <span>Persister</span>
