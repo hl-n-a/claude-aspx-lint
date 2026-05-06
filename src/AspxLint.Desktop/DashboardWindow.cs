@@ -6,6 +6,8 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using MessageBox = System.Windows.MessageBox;
 using WpfColor = System.Windows.Media.Color;
+using DataFormats = System.Windows.DataFormats;
+using DragDropEffects = System.Windows.DragDropEffects;
 
 namespace AspxLint.Desktop;
 
@@ -81,6 +83,34 @@ public sealed class DashboardWindow : Window
             {
                 StartFileWatcher(_allowedRoot);
             }
+
+            // Drag-and-drop natif Windows : on intercepte le drop sur le WebView
+            // pour recuperer le chemin absolu, qui n'est PAS expose au JS pur
+            // (sandbox navigateur). Permet a la dashboard de declencher /api/scan
+            // direct avec le serverPath, donc avec save-to-disk active.
+            _webView.AllowDrop = true;
+            _webView.PreviewDragOver += (s, e) =>
+            {
+                if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    e.Effects = DragDropEffects.Copy;
+                    e.Handled = true;
+                }
+            };
+            _webView.PreviewDrop += (s, e) =>
+            {
+                if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+                var paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (paths == null || paths.Length == 0) return;
+                e.Handled = true;
+                var json = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    kind = "droppedNativePaths",
+                    paths   // chemins absolus Windows
+                });
+                try { _webView.CoreWebView2.PostWebMessageAsString(json); }
+                catch { /* WebView pas pret */ }
+            };
         }
         catch (Exception ex)
         {

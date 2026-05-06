@@ -53,6 +53,14 @@ const state = {
   fileSearch: '',              // texte du filtre de recherche dans la sidebar
   splitView: false,            // vue code+diff cote a cote au lieu du toggle
   editMode: false,             // edition in-place dans le code area
+  search: {
+    open: false,
+    replaceOpen: false,
+    query: '',
+    caseSensitive: false,
+    matches: [],   // [{node, start, end}] positions DOM apres render
+    current: 0
+  },
   theme: 'default'
 };
 
@@ -801,6 +809,7 @@ function renderCode() {
   html += '</div>';
   area.innerHTML = html;
   attachIssueScrollSync();
+  if (state.search.open && state.search.query) applySearchHighlights();
 }
 
 /**
@@ -968,6 +977,7 @@ function renderSplit(file) {
     </div>
   `;
   attachIssueScrollSync();
+  if (state.search.open && state.search.query) applySearchHighlights();
 }
 
 /**
@@ -1105,6 +1115,7 @@ function renderDiff() {
   html += '</div>';
   area.innerHTML = html;
   attachIssueScrollSync();
+  if (state.search.open && state.search.query) applySearchHighlights();
 }
 
 /**
@@ -2593,6 +2604,210 @@ async function useDroppedEntriesFallback() {
 }
 
 /* ============================================================
+   FIND / REPLACE dans le code (Ctrl+F / Ctrl+H)
+   ============================================================
+   - Ouverture via raccourci clavier ou bouton
+   - Highlight live des matches dans le code (post-render DOM walk pour
+     wrapper les portions de texte dans des <mark>, sans casser les
+     tokens deja emis par highlightLine)
+   - Navigation prev/next avec scroll dans la vue
+   - Replace : applique sur file.current, re-analyse, re-render
+   ============================================================ */
+
+function openSearchBar(prefill) {
+  state.search.open = true;
+  $('searchBar').style.display = '';
+  if (typeof prefill === 'string') $('searchInput').value = prefill;
+  $('searchInput').focus();
+  $('searchInput').select();
+  onSearchInput();
+}
+
+function closeSearchBar() {
+  state.search.open = false;
+  state.search.replaceOpen = false;
+  state.search.query = '';
+  state.search.matches = [];
+  state.search.current = 0;
+  $('searchBar').style.display = 'none';
+  $('searchBarReplace').style.display = 'none';
+  // Re-render pour nettoyer les marks
+  renderCode();
+}
+
+function toggleSearchReplace() {
+  state.search.replaceOpen = !state.search.replaceOpen;
+  $('searchBarReplace').style.display = state.search.replaceOpen ? '' : 'none';
+  if (state.search.replaceOpen) $('searchReplaceInput').focus();
+}
+
+function onSearchInput() {
+  state.search.query = $('searchInput').value || '';
+  state.search.caseSensitive = $('searchCaseSensitive').checked;
+  state.search.current = 0;
+  applySearchHighlights();
+}
+
+function onSearchKey(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeSearchBar(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.shiftKey) searchPrev(); else searchNext();
+  }
+}
+
+function searchPrev() {
+  if (state.search.matches.length === 0) return;
+  state.search.current = (state.search.current - 1 + state.search.matches.length) % state.search.matches.length;
+  highlightActiveMatch();
+}
+
+function searchNext() {
+  if (state.search.matches.length === 0) return;
+  state.search.current = (state.search.current + 1) % state.search.matches.length;
+  highlightActiveMatch();
+}
+
+/**
+ * Walk les text nodes dans .code-area > .line-content (mode normal) ou
+ * .code-edit-highlight (mode edit) et wrap les matches dans <mark>.
+ */
+function applySearchHighlights() {
+  const codeArea = $('codeArea');
+  if (!codeArea) return;
+
+  // Nettoie les marks existants en deballant leur texte.
+  codeArea.querySelectorAll('mark.search-hit').forEach(mark => {
+    const txt = document.createTextNode(mark.textContent);
+    mark.parentNode.replaceChild(txt, mark);
+  });
+  // Normalize pour fusionner les text nodes adjacents.
+  codeArea.normalize();
+
+  const q = state.search.query;
+  if (!q) {
+    state.search.matches = [];
+    updateSearchCount();
+    return;
+  }
+
+  const flags = state.search.caseSensitive ? 'g' : 'gi';
+  const re = new RegExp(escapeRegex(q), flags);
+  const containerSel = '.line-content, .diff-content, .code-edit-highlight';
+
+  // 1) Collecte les text nodes a traiter (sans modifier l'arbre pendant le walk).
+  const targets = [];
+  const walker = document.createTreeWalker(codeArea, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => {
+      const parent = n.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.tagName === 'MARK') return NodeFilter.FILTER_REJECT;
+      if (!parent.closest(containerSel)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  let n; while ((n = walker.nextNode())) targets.push(n);
+
+  // 2) Wrap chaque match dans <mark class="search-hit">.
+  const allMarks = [];
+  for (const node of targets) {
+    const text = node.nodeValue;
+    re.lastIndex = 0;
+    const fragments = [];
+    let lastEnd = 0, m, hit = false;
+    while ((m = re.exec(text)) !== null) {
+      hit = true;
+      if (m.index > lastEnd) fragments.push(document.createTextNode(text.slice(lastEnd, m.index)));
+      const mark = document.createElement('mark');
+      mark.className = 'search-hit';
+      mark.textContent = m[0];
+      fragments.push(mark);
+      allMarks.push(mark);
+      lastEnd = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;   // garde-fou regex zero-length
+    }
+    if (hit) {
+      if (lastEnd < text.length) fragments.push(document.createTextNode(text.slice(lastEnd)));
+      const parent = node.parentNode;
+      for (const f of fragments) parent.insertBefore(f, node);
+      parent.removeChild(node);
+    }
+  }
+
+  state.search.matches = allMarks;
+  if (state.search.current >= allMarks.length) state.search.current = 0;
+  updateSearchCount();
+  highlightActiveMatch();
+}
+
+function highlightActiveMatch() {
+  state.search.matches.forEach((m, i) =>
+    m.classList.toggle('active', i === state.search.current));
+  const active = state.search.matches[state.search.current];
+  if (active) active.scrollIntoView({ block: 'center', behavior: 'instant' });
+  updateSearchCount();
+}
+
+function updateSearchCount() {
+  const total = state.search.matches.length;
+  const cur = total === 0 ? 0 : state.search.current + 1;
+  $('searchCount').textContent = `${cur}/${total}`;
+}
+
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+async function replaceCurrent() {
+  const file = currentFile();
+  if (!file) return;
+  const q = state.search.query;
+  const r = $('searchReplaceInput').value || '';
+  if (!q) return;
+
+  // On remplace la N-eme occurrence dans file.current. Calcul des positions
+  // sur le contenu source (regex flags = g + optionnel i).
+  const flags = state.search.caseSensitive ? 'g' : 'gi';
+  const re = new RegExp(escapeRegex(q), flags);
+  let m, count = 0;
+  let newContent = file.current;
+  re.lastIndex = 0;
+  // Pour eviter l'infinite loop sur match vide ou regex avec memoire,
+  // on collecte d'abord les positions, puis on remplace en partant de la fin.
+  const positions = [];
+  while ((m = re.exec(file.current)) !== null) {
+    positions.push({ start: m.index, end: m.index + m[0].length });
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  if (positions.length === 0) { showToast('Aucun match.', 'error'); return; }
+  const idx = state.search.current % positions.length;
+  const p = positions[idx];
+  newContent = file.current.slice(0, p.start) + r + file.current.slice(p.end);
+  file.current = newContent;
+  await runAnalysis(file);
+  state.search.current = idx;
+  renderAll();
+  applySearchHighlights();
+  showToast(`Remplacé 1 occurrence (${positions.length - 1} restante(s)).`, 'success');
+}
+
+async function replaceAll() {
+  const file = currentFile();
+  if (!file) return;
+  const q = state.search.query;
+  const r = $('searchReplaceInput').value || '';
+  if (!q) return;
+  const flags = state.search.caseSensitive ? 'g' : 'gi';
+  const re = new RegExp(escapeRegex(q), flags);
+  const before = file.current;
+  let count = 0;
+  file.current = before.replace(re, () => { count++; return r; });
+  if (count === 0) { showToast('Aucun match.', 'error'); return; }
+  await runAnalysis(file);
+  renderAll();
+  applySearchHighlights();
+  showToast(`${count} occurrence(s) remplacée(s).`, 'success');
+}
+
+/* ============================================================
    COMMAND PALETTE (Ctrl+P) — fichiers + commandes
    ============================================================ */
 
@@ -2757,6 +2972,21 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Ctrl/Cmd+F — find dans le code (intercept toujours, meme dans inputs ?
+  // non — si l'utilisateur tape dans un champ on laisse le navigateur gerer).
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && !inInput) {
+    e.preventDefault();
+    openSearchBar();
+    return;
+  }
+  // Ctrl/Cmd+H — find + replace
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'h' && !inInput) {
+    e.preventDefault();
+    openSearchBar();
+    if (!state.search.replaceOpen) toggleSearchReplace();
+    return;
+  }
+
   if (inInput) return;   // les autres ne s'appliquent pas dans un input
 
   // Ctrl+Shift+F — Tout corriger projet
@@ -2827,10 +3057,100 @@ if (window.chrome && window.chrome.webview && typeof window.chrome.webview.addEv
     let msg;
     try { msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; }
     catch { return; }
-    if (msg && msg.kind === 'fileChanges' && Array.isArray(msg.paths)) {
+    if (!msg) return;
+    if (msg.kind === 'fileChanges' && Array.isArray(msg.paths)) {
       onDesktopFileChanges(msg.paths);
+    } else if (msg.kind === 'droppedNativePaths' && Array.isArray(msg.paths)) {
+      onDesktopNativeDrop(msg.paths);
     }
   });
+}
+
+/**
+ * Drop d'un fichier ou dossier dans le WebView2 Desktop : on a recu les
+ * chemins absolus Windows. Si c'est un dossier, on declenche /api/scan direct
+ * (avec serverPath -> save-to-disk possible). Si c'est des fichiers, on
+ * appelle /api/read pour chacun.
+ */
+async function onDesktopNativeDrop(paths) {
+  // Heuristique : on traite le PREMIER dossier en priorite (cas le plus
+  // courant : drag d'un dossier de projet). Si pas de dossier, on tente
+  // les fichiers individuellement.
+  let folderHandled = false;
+  for (const p of paths) {
+    try {
+      // Detect dossier vs fichier en interrogeant /api/browse (qui repond
+      // 200 sur un dossier, 404/403 sinon).
+      const r = await fetch('/api/browse?path=' + encodeURIComponent(p));
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (data.path) {
+        // C'est un dossier valide sous AllowedRoot. On le scanne.
+        await scanServerFolderAtPath(p);
+        folderHandled = true;
+        break;
+      }
+    } catch { /* ignore */ }
+  }
+  if (folderHandled) return;
+
+  // Sinon : tente comme fichiers individuels via /api/read.
+  let added = 0;
+  for (const p of paths) {
+    try {
+      const r = await fetch('/api/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p })
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      const name = p.split(/[\\/]/).pop() || 'inconnu';
+      await addFile(name, data.content, p);
+      added++;
+    } catch { /* ignore */ }
+  }
+  if (added > 0) {
+    showToast(`${added} fichier(s) chargé(s) depuis le drop natif.`, 'success');
+    if (!state.currentFileId && state.files.length > 0) {
+      state.currentFileId = state.files[state.files.length - 1].id;
+    }
+    renderAll();
+  }
+}
+
+/** Lance un /api/scan direct sur un chemin absolu (depuis le drop natif). */
+async function scanServerFolderAtPath(path) {
+  showToast('Scan en cours…', 'success');
+  try {
+    const r = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      showToast(`Scan KO (${r.status}) : ${txt.substring(0, 100)}`, 'error');
+      return;
+    }
+    const data = await r.json();
+    if (!data.files || data.files.length === 0) {
+      showToast('Aucun fichier .aspx / .ascx / .master / .asax dans ce dossier.', 'error');
+      return;
+    }
+    const beforeCount = state.files.length;
+    for (const sf of data.files) {
+      const name = sf.relativePath || (sf.path || '').split(/[\\/]/).pop() || 'inconnu';
+      await addFile(name, sf.content, sf.path);
+    }
+    if (state.files.length > beforeCount) {
+      state.currentFileId = state.files[beforeCount].id;
+    }
+    showToast(`Scan OK : ${data.fileCount} fichier(s) chargé(s).`, 'success');
+    renderAll();
+  } catch (e) {
+    showToast('Scan échoué : ' + e.message, 'error');
+  }
 }
 
 async function onDesktopFileChanges(paths) {

@@ -97,6 +97,9 @@ public static class CliRunner
             {
                 case "--json": format = "json"; break;
                 case "--sarif": format = "sarif"; break;
+                case "--junit": format = "junit"; break;
+                case "--codeclimate": format = "codeclimate"; break;
+                case "--tap": format = "tap"; break;
                 case "--quiet": case "-q": quiet = true; break;
                 case "--no-color": noColor = true; break;
                 case "--lang" when i + 1 < args.Length:
@@ -163,6 +166,15 @@ public static class CliRunner
                 break;
             case "sarif":
                 await SarifFormatter.WriteAsync(filtered, rules, stdout);
+                break;
+            case "junit":
+                await JunitFormatter.WriteAsync(filtered, totalIssues, stdout);
+                break;
+            case "codeclimate":
+                await CodeClimateFormatter.WriteAsync(filtered, stdout);
+                break;
+            case "tap":
+                await TapFormatter.WriteAsync(filtered, stdout);
                 break;
             default:
                 bool useColor = !noColor && SupportsColor(stdout);
@@ -270,7 +282,8 @@ public static class CliRunner
         o.WriteLine("aspx-lint — analyseur de fichiers ASP.NET Web Forms");
         o.WriteLine();
         o.WriteLine("Usage:");
-        o.WriteLine("  aspx-lint scan <path> [--json | --sarif] [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
+        o.WriteLine("  aspx-lint scan <path> [--json | --sarif | --junit | --codeclimate | --tap]");
+        o.WriteLine("                       [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
         o.WriteLine("  aspx-lint watch <path> [--severity error|warning|info]");
         o.WriteLine("  aspx-lint init [--with-hook]");

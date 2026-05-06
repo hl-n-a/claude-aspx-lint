@@ -103,6 +103,22 @@
           <button class="btn small" id="btnVerify" onclick="verifyCurrent()" disabled>🔍 Re-vérifier</button>
         </div>
       </div>
+      <div class="search-bar" id="searchBar" style="display:none">
+        <input type="text" id="searchInput" placeholder="Rechercher (Esc ferme, Enter / Shift+Enter navigue)" oninput="onSearchInput()" onkeydown="onSearchKey(event)" autocomplete="off" />
+        <span class="search-count" id="searchCount">0/0</span>
+        <button class="btn small ghost" onclick="searchPrev()" title="Précédent (Shift+Enter)">↑</button>
+        <button class="btn small ghost" onclick="searchNext()" title="Suivant (Enter)">↓</button>
+        <label class="search-toggle" title="Sensible à la casse">
+          <input type="checkbox" id="searchCaseSensitive" onchange="onSearchInput()" /> Aa
+        </label>
+        <button class="btn small ghost" onclick="toggleSearchReplace()" title="Replace (Ctrl+H)" id="btnSearchToggleReplace">+ Replace</button>
+        <button class="btn small ghost" onclick="closeSearchBar()" title="Fermer (Esc)">×</button>
+      </div>
+      <div class="search-bar-replace" id="searchBarReplace" style="display:none">
+        <input type="text" id="searchReplaceInput" placeholder="Remplacer par…" autocomplete="off" />
+        <button class="btn small" onclick="replaceCurrent()">Remplacer</button>
+        <button class="btn small primary" onclick="replaceAll()">Tout remplacer</button>
+      </div>
       <div class="code-area" id="codeArea">
         <div class="code-empty">
           <div class="code-empty-headline">Une analyse soignée pour vos pages serveurs.</div>

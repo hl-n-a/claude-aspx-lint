@@ -935,6 +935,65 @@
     font-weight: 600;
   }
 
+  /* Find / Replace bar (Ctrl+F / Ctrl+H) */
+  .search-bar, .search-bar-replace {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .search-bar input[type="text"],
+  .search-bar-replace input[type="text"] {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .search-bar input[type="text"]:focus,
+  .search-bar-replace input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .search-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 0 6px;
+    min-width: 40px;
+    text-align: right;
+  }
+  .search-toggle {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0 4px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .search-toggle input { cursor: pointer; }
+
+  /* Markers de recherche dans le code (insérés via DOM walk après render) */
+  mark.search-hit {
+    background: rgba(255, 184, 77, 0.4);
+    color: inherit;
+    border-radius: 1px;
+    padding: 0;
+  }
+  mark.search-hit.active {
+    background: var(--accent);
+    color: var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
   /* Mode edition in-place — overlay textarea + pre. Le pre montre le code
      coloré (highlight live), le textarea recoit la frappe avec un caret visible
      mais texte transparent. Les deux DOIVENT partager font/padding/line-height
