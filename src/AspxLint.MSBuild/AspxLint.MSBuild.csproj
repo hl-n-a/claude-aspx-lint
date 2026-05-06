@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Package "MSBuild props/targets only" : pas de DLL .NET, juste un
+      fichier .targets injecte dans le csproj consommateur. Cf.
+      https://learn.microsoft.com/en-us/nuget/create-packages/creating-a-package-msbuild
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoBuild>true</NoBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <PackageId>aspx-lint.MSBuild</PackageId>
+    <Title>aspx-lint MSBuild integration</Title>
+    <Description>MSBuild integration for aspx-lint. Add this PackageReference to a csproj and `dotnet build` runs aspx-lint over the project's .aspx/.ascx/.master/.asax/.config files. Requires the `aspx-lint` global CLI (dotnet tool install -g aspx-lint).</Description>
+    <Authors>hl-n-a</Authors>
+    <Owners>hl-n-a</Owners>
+    <PackageProjectUrl>https://hl-n-a.github.io/claude-aspx-lint/</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hl-n-a/claude-aspx-lint</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>asp.net;web-forms;aspx;lint;msbuild</PackageTags>
+    <Copyright>(c) hl-n-a</Copyright>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DevelopmentDependency>true</DevelopmentDependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="build\aspx-lint.MSBuild.targets" Pack="true" PackagePath="build\" />
+    <None Include="build\aspx-lint.MSBuild.props"   Pack="true" PackagePath="build\" />
+    <None Include="README.md"                        Pack="true" PackagePath="\"     />
+  </ItemGroup>
+
+  <!--
+    MinVer est deja injecte par Directory.Build.props : pas besoin de le
+    re-declarer ici, sinon NU1504 (duplicate PackageReference).
+  -->
+
+</Project>

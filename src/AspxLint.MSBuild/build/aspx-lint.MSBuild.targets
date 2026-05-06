@@ -1,0 +1,62 @@
+<Project>
+
+  <!--
+    aspx-lint.MSBuild targets : hook dans le pipeline de build pour lancer
+    `aspx-lint scan` apres la compilation. Les warnings/errors sont reportes
+    via MSBuild comme des warnings classiques (visibles dans VS Error List
+    + dans la console + dans les logs CI).
+
+    Pre-requis : avoir installe le CLI globalement
+        dotnet tool install --global aspx-lint
+
+    Configuration (optionnelle, dans <PropertyGroup> du csproj) :
+        <AspxLintEnabled>true|false</AspxLintEnabled>
+        <AspxLintFailOnSeverity>error|warning|info</AspxLintFailOnSeverity>
+        <AspxLintScanPath>$(MSBuildProjectDirectory)</AspxLintScanPath>
+        <AspxLintExecutable>aspx-lint</AspxLintExecutable>
+        <AspxLintQuiet>false</AspxLintQuiet>
+
+    Pour skipper aspx-lint en debug local mais l'imposer en CI :
+        <AspxLintEnabled Condition="'$(CI)' == 'true'">true</AspxLintEnabled>
+  -->
+
+  <!-- Hook : on tourne apres Build pour avoir des binaires meme si lint fail. -->
+  <Target Name="AspxLintRun"
+          AfterTargets="Build"
+          Condition="'$(AspxLintEnabled)' == 'true'">
+
+    <PropertyGroup>
+      <_AspxLintQuietFlag Condition="'$(AspxLintQuiet)' == 'true'">--quiet</_AspxLintQuietFlag>
+      <_AspxLintCmd>"$(AspxLintExecutable)" scan "$(AspxLintScanPath)" --severity $(AspxLintFailOnSeverity) --no-color $(_AspxLintQuietFlag)</_AspxLintCmd>
+    </PropertyGroup>
+
+    <Message Importance="high"
+             Text="aspx-lint : $(_AspxLintCmd)" />
+
+    <!--
+      IgnoreExitCode=true : on capture le code mais on n'echoue pas tout de
+      suite, pour pouvoir afficher la sortie meme en cas d'erreur.
+
+      Le CLI sort 1 si des issues sont trouvees a >= severity, 2 sur erreur
+      d'execution. On laisse 0 et 1 passer ; 2 echoue. La presence d'une
+      issue >= severity remonte aussi un erreur MSBuild via <Error>.
+    -->
+    <Exec Command="$(_AspxLintCmd)"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ExitCode" PropertyName="_AspxLintExitCode" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_AspxLintOutput" />
+    </Exec>
+
+    <Error Condition="'$(_AspxLintExitCode)' == '2'"
+           Text="aspx-lint : erreur d'execution du linter (exit 2). Verifie que le CLI est installe (dotnet tool install -g aspx-lint) et que le path scanne existe." />
+
+    <Error Condition="'$(_AspxLintExitCode)' == '1'"
+           Text="aspx-lint : au moins une issue de severite >= $(AspxLintFailOnSeverity) detectee. Voir la sortie ci-dessus pour les details, ou run 'aspx-lint scan $(AspxLintScanPath)' localement." />
+
+    <Message Importance="high"
+             Condition="'$(_AspxLintExitCode)' == '0'"
+             Text="aspx-lint : OK (aucune issue >= $(AspxLintFailOnSeverity))." />
+  </Target>
+
+</Project>

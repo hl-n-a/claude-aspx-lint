@@ -15,11 +15,12 @@ handlers JS inline). Scan parallèle (~0.7s sur 350 fichiers), config par
 projet (`.aspxlintrc.json`), disable inline par commentaire, watch mode,
 hook pre-commit, intégration GitHub Actions avec annotations PR.
 
-Quatre manières de l'utiliser :
+Cinq manières de l'utiliser :
 
 | Forme | Pour qui | Install |
 |---|---|---|
 | **CLI** `aspx-lint` | CI, scripts, lint local | `dotnet tool install -g aspx-lint` |
+| **MSBuild** `aspx-lint.MSBuild` | `dotnet build` qui échoue sur erreur lint | `<PackageReference Include="aspx-lint.MSBuild" />` |
 | **Extension VS Code** | Diagnostics inline pendant que tu codes | Marketplace : `aspx-lint` |
 | **Dashboard Web** | Inspection ponctuelle, mobile, équipe | Servie par `AspxLint.Server` (`/`) |
 | **App desktop** | Pairing tél / desktop, tray Windows | `dotnet run --project src/AspxLint.Desktop` |
@@ -123,6 +124,51 @@ Détails des inputs : voir [.github/actions/scan/README.md](.github/actions/scan
 ```
 
 Les findings apparaissent dans l'onglet *Security → Code scanning alerts* du repo.
+
+---
+
+## Intégration MSBuild
+
+Pour qu'un `dotnet build` lance automatiquement aspx-lint et fasse échouer la
+build sur erreur lint, ajoute le package `aspx-lint.MSBuild` au csproj du
+projet web :
+
+```xml
+<ItemGroup>
+  <PackageReference Include="aspx-lint.MSBuild" Version="0.3.0">
+    <PrivateAssets>all</PrivateAssets>
+  </PackageReference>
+</ItemGroup>
+```
+
+Pré-requis : `dotnet tool install -g aspx-lint` (le package shell-out vers
+le CLI). Configurable via `<PropertyGroup>` :
+
+```xml
+<PropertyGroup>
+  <AspxLintFailOnSeverity>error</AspxLintFailOnSeverity>  <!-- error|warning|info -->
+  <AspxLintEnabled Condition="'$(CI)' != 'true'">false</AspxLintEnabled>
+</PropertyGroup>
+```
+
+Détails : voir [src/AspxLint.MSBuild/README.md](src/AspxLint.MSBuild/README.md).
+
+---
+
+## Extension VS Code
+
+Diagnostics inline et code actions pour les fichiers ASP.NET Web Forms
+(`.aspx`, `.ascx`, `.master`, `.asax`) et `Web.config`. Pré-requis :
+`dotnet tool install -g aspx-lint`. L'extension shell-out vers le CLI.
+
+Installation :
+
+```bash
+code --install-extension aspx-lint
+# ou via le Marketplace : Ctrl+Shift+X, chercher "aspx-lint"
+```
+
+Détails : voir [src/AspxLint.VSCode/README.md](src/AspxLint.VSCode/README.md).
 
 ---
 

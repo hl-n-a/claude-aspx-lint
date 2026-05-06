@@ -1,0 +1,26 @@
+<Project>
+
+  <!--
+    aspx-lint.MSBuild props : valeurs par defaut, peut etre override dans
+    le csproj consommateur. Charge AVANT le csproj donc l'utilisateur peut
+    surcharger via une <PropertyGroup>.
+  -->
+
+  <PropertyGroup>
+    <!-- Active/desactive l'execution. Par defaut on lint a chaque build. -->
+    <AspxLintEnabled Condition="'$(AspxLintEnabled)' == ''">true</AspxLintEnabled>
+
+    <!-- Severite minimum qui fait echouer la build. error / warning / info. -->
+    <AspxLintFailOnSeverity Condition="'$(AspxLintFailOnSeverity)' == ''">error</AspxLintFailOnSeverity>
+
+    <!-- Path du binaire aspx-lint. Vide = recherche dans PATH. -->
+    <AspxLintExecutable Condition="'$(AspxLintExecutable)' == ''">aspx-lint</AspxLintExecutable>
+
+    <!-- Dossier scanne. Par defaut $(MSBuildProjectDirectory). -->
+    <AspxLintScanPath Condition="'$(AspxLintScanPath)' == ''">$(MSBuildProjectDirectory)</AspxLintScanPath>
+
+    <!-- Mode silencieux par defaut : juste le summary, pas chaque issue. -->
+    <AspxLintQuiet Condition="'$(AspxLintQuiet)' == ''">false</AspxLintQuiet>
+  </PropertyGroup>
+
+</Project>
