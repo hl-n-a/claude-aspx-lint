@@ -49,9 +49,13 @@ header {
 }
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   font-family: var(--mono);
+}
+.brand-icon {
+  border-radius: 6px;
+  flex-shrink: 0;
 }
 .brand-mark {
   font-family: var(--serif);

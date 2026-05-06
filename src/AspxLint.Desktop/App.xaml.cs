@@ -147,11 +147,28 @@ public partial class App : Application
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
     /// <summary>
-    /// Genere une icone 16x16 a la volee : carre noir + lettre "A" en jaune-vert
-    /// (l'accent du dashboard, #d4ff3a). Evite d'avoir a livrer un .ico.
+    /// Charge l'icone embedde du projet (ressource icon.ico, multi-resolution
+    /// 16/32/48/64/128/256). Fallback sur une icone generee a la volee si la
+    /// ressource est absente — utile en dev rapide ou si on veut tester sans
+    /// poser le .ico.
     /// </summary>
     private static Icon CreateIcon()
     {
+        // Ressource : pack://application:,,,/icon.ico (declaree dans .csproj
+        // via <Resource Include="icon.ico" />). On la lit comme stream et on
+        // construit un System.Drawing.Icon depuis ces bytes.
+        try
+        {
+            var uri = new Uri("pack://application:,,,/icon.ico", UriKind.Absolute);
+            var info = System.Windows.Application.GetResourceStream(uri);
+            if (info?.Stream != null)
+            {
+                using var stream = info.Stream;
+                return new Icon(stream);
+            }
+        }
+        catch { /* fallback ci-dessous */ }
+
         using var bmp = new Bitmap(16, 16);
         using (var g = Graphics.FromImage(bmp))
         {

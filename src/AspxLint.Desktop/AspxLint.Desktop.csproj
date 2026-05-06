@@ -9,7 +9,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AspxLint.Desktop</RootNamespace>
     <AssemblyName>AspxLint.Desktop</AssemblyName>
+    <!-- ressource Win32 dans le .exe : c'est l'icone montree dans
+         l'Explorateur, dans la taskbar, et dans les properties Windows. -->
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embed l'icone aussi comme ressource WPF/WinForms pour la fenetre
+         et le NotifyIcon (le tray) qui peuvent en avoir besoin a runtime. -->
+    <Resource Include="icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />

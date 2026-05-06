@@ -38,6 +38,32 @@ public class DashboardHtmlTests : IClassFixture<ApiFixture>
         Assert.Contains("id=\"batchReportModal\"", html);
     }
 
+    [Fact]
+    public async Task Dashboard_links_to_favicon()
+    {
+        var html = await GetDashboardHtml();
+        Assert.Contains("rel=\"icon\"", html);
+        Assert.Contains("/favicon.ico", html);
+    }
+
+    [Fact]
+    public async Task Favicon_is_served_without_auth()
+    {
+        // /favicon.ico ne doit PAS demander de token : un browser charge le
+        // favicon avant d'avoir traite le cookie/token de la requete /.
+        var client = _fx.CreateClient();   // raw, sans cookie d'auth
+        var r = await client.GetAsync("/favicon.ico");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("image/x-icon", r.Content.Headers.ContentType?.MediaType);
+        var bytes = await r.Content.ReadAsByteArrayAsync();
+        // ICO signature : 00 00 01 00 (reserved + type=ICO)
+        Assert.True(bytes.Length > 100);
+        Assert.Equal(0, bytes[0]);
+        Assert.Equal(0, bytes[1]);
+        Assert.Equal(1, bytes[2]);
+        Assert.Equal(0, bytes[3]);
+    }
+
     [Theory]
     // Une fonction-cle par module : si le module est absent, le test casse.
     [InlineData("01-state",            "loadRulesFromServer")]

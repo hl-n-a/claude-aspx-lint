@@ -27,6 +27,13 @@ TestResults/
 *.trx
 coverage/
 coverage-report/
+
+# --------------------------------------------------------
+# Assets : sources versionees, derives regenerables via le
+# script assets/build-icons.ps1 (cabled copies in src/ are
+# tracked).
+# --------------------------------------------------------
+assets/derived/
 *.nupkg
 nupkg/
 

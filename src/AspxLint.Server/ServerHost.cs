@@ -144,7 +144,8 @@ public static class ServerHost
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/healthz") ||
-                ctx.Request.Path.StartsWithSegments("/swagger"))
+                ctx.Request.Path.StartsWithSegments("/swagger") ||
+                ctx.Request.Path.StartsWithSegments("/favicon.ico"))
             { await next(); return; }
 
             var supplied = ctx.Request.Query["token"].ToString();
@@ -180,6 +181,16 @@ public static class ServerHost
         });
 
         app.MapGet("/healthz", () => Results.Ok(new { ok = true, buildId = session.BuildId }));
+
+        // /favicon.ico — sans auth, sert l'icone embarquee. Cache 1 jour cote
+        // browser pour eviter de servir a chaque refresh.
+        app.MapGet("/favicon.ico", () =>
+        {
+            var asm = typeof(ServerHost).Assembly;
+            var stream = asm.GetManifestResourceStream("AspxLint.Web.favicon.ico");
+            if (stream == null) return Results.NotFound();
+            return Results.Stream(stream, "image/x-icon");
+        });
 
         // Server-Sent Events : flux longue duree qui pousse les changements
         // (file save, scan, fix) a tous les clients connectes. Permet a

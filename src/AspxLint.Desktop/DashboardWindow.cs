@@ -36,6 +36,15 @@ public sealed class DashboardWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = new SolidColorBrush(WpfColor.FromRgb(20, 24, 28));
 
+        // Icone de fenetre : title bar Windows + taskbar. Ressource embarquee
+        // par AspxLint.Desktop.csproj (<Resource Include="icon.ico" />).
+        try
+        {
+            var uri = new Uri("pack://application:,,,/icon.ico", UriKind.Absolute);
+            Icon = System.Windows.Media.Imaging.BitmapFrame.Create(uri);
+        }
+        catch { /* fallback : pas d'icone de fenetre, le tray icon suffit. */ }
+
         _webView = new WebView2();
         Content = _webView;
 

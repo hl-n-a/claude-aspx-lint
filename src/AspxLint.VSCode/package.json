@@ -5,6 +5,11 @@
   "version": "0.3.0",
   "publisher": "hl-n-a",
   "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#0f1419",
+    "theme": "dark"
+  },
   "categories": [
     "Linters",
     "Programming Languages"

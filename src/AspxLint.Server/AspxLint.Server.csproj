@@ -30,6 +30,9 @@
     <EmbeddedResource Include="..\AspxLint.Web\styles.css"
                       Link="styles.css"
                       LogicalName="AspxLint.Web.styles.css" />
+    <EmbeddedResource Include="..\AspxLint.Web\favicon.ico"
+                      Link="favicon.ico"
+                      LogicalName="AspxLint.Web.favicon.ico" />
     <!--
       app.js a ete decoupe en 17 modules dans src/AspxLint.Web/modules/.
       Index.html les inclut un par un via {{include:modules/NN-name.js}}.
