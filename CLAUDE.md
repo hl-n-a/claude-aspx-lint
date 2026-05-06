@@ -20,7 +20,7 @@ serveur, aucune build step, aucune télémétrie. Garder cette propriété.
 ## Architecture du script
 
 ```
-RULES = [...]              // 24 règles, chacune { id, name, severity, desc, detect, fix? }
+RULES = [...]              // 29 règles, chacune { id, name, severity, desc, detect, fix? }
 state = { files, currentFileId, filter, viewMode, fixedCount }
 
 // Pipeline
@@ -84,12 +84,51 @@ MASTER uniquement, ASP-004 page enfant, etc.).
 | CHAR-001  | warning    |          | `&` non échappé (manuel — risqué d'auto-fixer)     |
 | COM-001   | warning    |          | `--` à l'intérieur d'un commentaire HTML           |
 | SEC-001   | error      | ✓        | `EnableViewStateMac="false"`                       |
+| SEC-002   | warning    | ✓        | `target="_blank"` sans `rel="noopener"` (tabnabbing) |
+| SEC-003   | warning    |          | URL hardcodée vers localhost / *.local / port      |
+| A11Y-001  | warning    |          | `<img>` sans attribut `alt`                        |
+| STYLE-001 | info       |          | `style="..."` inline                                |
+| SCRIPT-001| info       |          | Handler JS inline (`onclick=...`, …)                |
 | DOC-001   | warning    | ✓        | DOCTYPE manquant (ASPX standalone uniquement)      |
 | FORM-001  | error      | ✓        | `<form>` sans `runat="server"` dans ASPX           |
 | SM-001    | error      |          | Plusieurs `<asp:ScriptManager>`                    |
 
-18 règles ont un auto-fix, 6 nécessitent une correction manuelle (renommage
-d'IDs, restructuration HTML, etc.).
+19 règles ont un auto-fix, 10 nécessitent une correction manuelle.
+
+## Configuration projet (.aspxlintrc.json)
+
+Le CLI cherche un fichier `.aspxlintrc.json` en remontant l'arborescence
+depuis le dossier scanné. Format :
+
+```json
+{
+  "ignore": ["**/Generated/**", "**/bin/**", "*.bak"],
+  "rules": {
+    "TAG-003": "off",
+    "CHAR-001": "info",
+    "ASP-005": "warning"
+  }
+}
+```
+
+- `ignore` : globs (`*` ne traverse pas `/`, `**` oui). Les fichiers
+  matchés sont skip avant analyse.
+- `rules` : valeurs `off` / `error` / `warning` / `info`. `off` désactive
+  la règle, les autres overrident sa sévérité par défaut.
+
+## Disable inline (commentaires)
+
+Marqueurs reconnus dans `<%-- ... --%>` ou `<!-- ... -->` :
+
+```aspx
+<%-- aspx-lint disable TAG-003 --%>
+<div>... ligne suivante ignorée pour TAG-003 ...</div>
+
+<%-- aspx-lint disable TAG-003,ATTR-002 --%>     <!-- plusieurs règles -->
+<%-- aspx-lint disable-line TAG-003 --%>         <!-- alias explicite -->
+<%-- aspx-lint disable-file TAG-003 --%>         <!-- toute la suite du fichier -->
+<%-- aspx-lint disable-file --%>                 <!-- toutes règles, fichier entier -->
+```
 
 ## Bugs résolus (à ne pas régresser)
 

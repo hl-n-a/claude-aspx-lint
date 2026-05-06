@@ -63,6 +63,66 @@ runs:
         sarif_file: ${{ inputs.output }}
       continue-on-error: true
 
+    - name: Emit GitHub annotations + step summary
+      shell: bash
+      run: |
+        # On utilise la sortie JSON pour generer des annotations propres et un
+        # tableau de synthese dans le step summary GitHub. La sortie SARIF gere
+        # deja Code Scanning ; les annotations sont visibles dans la PR review.
+        aspx-lint scan "${{ inputs.path }}" --json > /tmp/aspx-lint.json 2>/dev/null || true
+
+        if [ ! -s /tmp/aspx-lint.json ]; then
+          echo "::warning::aspx-lint a produit un JSON vide, on saute les annotations."
+          exit 0
+        fi
+
+        # Annotations PR : une ligne par issue, format `::level file=,line=,col=::message`.
+        # On boucle sur les fichiers/issues via jq (preinstalle sur tous les runners).
+        if command -v jq >/dev/null; then
+          jq -r '
+            .files[]
+            | .relativePath as $f
+            | .issues[]
+            | "::\(if .severity == "error" then "error" elif .severity == "warning" then "warning" else "notice" end) file=\($f),line=\(.line),col=\(.col),title=[\(.ruleId)] \(.ruleName)::\(.hint)"
+          ' /tmp/aspx-lint.json
+        fi
+
+        # Step summary : tableau Markdown avec stats par regle + top fichiers.
+        if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+          {
+            FILE_COUNT=$(jq '.fileCount' /tmp/aspx-lint.json)
+            ISSUE_COUNT=$(jq '.issueCount' /tmp/aspx-lint.json)
+            echo "# aspx-lint — rapport"
+            echo
+            echo "**$FILE_COUNT fichier(s) scannés, $ISSUE_COUNT problème(s) trouvé(s).**"
+            echo
+            echo "## Par règle"
+            echo
+            echo "| Count | Règle | Sévérité |"
+            echo "|------:|-------|----------|"
+            jq -r '
+              [.files[] | .issues[]]
+              | group_by(.ruleId)
+              | map({ruleId: .[0].ruleId, severity: .[0].severity, count: length})
+              | sort_by(-.count)
+              | .[]
+              | "| \(.count) | \(.ruleId) | \(.severity) |"
+            ' /tmp/aspx-lint.json
+            echo
+            echo "## Top fichiers"
+            echo
+            echo "| Issues | Fichier |"
+            echo "|-------:|---------|"
+            jq -r '
+              .files
+              | map(select(.issues | length > 0))
+              | sort_by(-(.issues | length))
+              | .[0:10][]
+              | "| \(.issues | length) | `\(.relativePath)` |"
+            ' /tmp/aspx-lint.json
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
     - name: Run scan (text, propagate exit code per --severity)
       shell: bash
       run: |

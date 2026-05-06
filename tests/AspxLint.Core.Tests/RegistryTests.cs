@@ -9,14 +9,17 @@ public class RegistryTests
         "ATTR-001", "ATTR-002", "ATTR-003",
         "ASP-001", "ASP-002", "ASP-003", "ASP-004", "ASP-005",
         "WS-001", "WS-002", "WS-003", "WS-004", "WS-005", "WS-006",
-        "CHAR-001", "COM-001", "SEC-001",
+        "CHAR-001", "COM-001",
+        "SEC-001", "SEC-002", "SEC-003",
+        "A11Y-001",
+        "STYLE-001", "SCRIPT-001",
         "DOC-001", "FORM-001", "SM-001"
     };
 
     [Fact]
-    public void All_24_rules_registered()
+    public void All_29_rules_registered()
     {
-        Assert.Equal(24, RuleRegistry.All.Count);
+        Assert.Equal(29, RuleRegistry.All.Count);
     }
 
     [Fact]
@@ -39,12 +42,13 @@ public class RegistryTests
     }
 
     [Fact]
-    public void Fixable_count_is_18()
+    public void Fixable_count_is_19()
     {
-        // 18 regles auto-fixables, 6 manuelles. WS-006 nouvelle : trailing blank
-        // lines en fin de fichier (a cote de WS-003 milieu et WS-004 final \n).
-        Assert.Equal(18, RuleRegistry.All.Count(r => r.HasFix));
-        Assert.Equal(6, RuleRegistry.All.Count(r => !r.HasFix));
+        // 19 regles auto-fixables sur 29 totales. Les 5 nouvelles regles (SEC-002
+        // a SCRIPT-001) ne sont auto-fixables qu'a une exception (SEC-002 ajoute
+        // rel="noopener noreferrer"). Les autres demandent une decision humaine.
+        Assert.Equal(19, RuleRegistry.All.Count(r => r.HasFix));
+        Assert.Equal(10, RuleRegistry.All.Count(r => !r.HasFix));
     }
 
     [Theory]

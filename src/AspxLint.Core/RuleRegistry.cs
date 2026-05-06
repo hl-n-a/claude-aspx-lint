@@ -42,6 +42,15 @@ public static class RuleRegistry
 
         // Securite
         new Sec001ViewStateMacFalse(),
+        new Sec002TargetBlankNoopener(),
+        new Sec003LocalUrl(),
+
+        // Accessibilite
+        new A11y001ImgWithoutAlt(),
+
+        // Style / scripts inline
+        new Style001InlineStyle(),
+        new Script001InlineHandler(),
 
         // DOCTYPE
         new Doc001MissingDoctype(),

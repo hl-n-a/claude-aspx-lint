@@ -425,6 +425,208 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void IssueFilter_disable_line_ignores_next_line()
+    {
+        var content =
+            "<%-- aspx-lint disable WS-001 --%>\n" +
+            "<p>x   \n" +    // trailing whitespace -> WS-001 normally fires
+            "<p>y   \n";     // this one still fires
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All);
+        var ws1 = issues.Where(i => i.RuleId == "WS-001").ToList();
+        Assert.Single(ws1);
+        Assert.Equal(3, ws1[0].Line);   // ligne 2 disabled, ligne 3 retenue
+    }
+
+    [Fact]
+    public void IssueFilter_disable_file_ignores_whole_file()
+    {
+        var content =
+            "<%-- aspx-lint disable-file WS-001 --%>\n" +
+            "<p>x   \n" +
+            "<p>y   \n";
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All);
+        Assert.Empty(issues.Where(i => i.RuleId == "WS-001"));
+    }
+
+    [Fact]
+    public void IssueFilter_disable_file_without_rule_disables_all()
+    {
+        var content =
+            "<%-- aspx-lint disable-file --%>\n" +
+            "<p>x   \n" +
+            "<DIV>caps</DIV>\n";
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All);
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void IssueFilter_html_comment_syntax_works()
+    {
+        // Le marker peut etre dans un commentaire HTML <!-- --> aussi.
+        var content =
+            "<!-- aspx-lint disable-file WS-001 -->\n" +
+            "<p>x   \n";
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All);
+        Assert.Empty(issues.Where(i => i.RuleId == "WS-001"));
+    }
+
+    [Fact]
+    public void Config_off_disables_rule_completely()
+    {
+        var config = new AspxLintConfig { Rules = { ["WS-001"] = "off" } };
+        var content = "<p>x   \n";
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All, config);
+        Assert.Empty(issues.Where(i => i.RuleId == "WS-001"));
+    }
+
+    [Fact]
+    public void Config_severity_override_changes_reported_severity()
+    {
+        var config = new AspxLintConfig { Rules = { ["WS-001"] = "error" } };
+        var content = "<p>x   \n";
+        var issues = Analyzer.Analyze("x.aspx", content, RuleRegistry.All, config);
+        var ws1 = issues.Where(i => i.RuleId == "WS-001").ToList();
+        Assert.NotEmpty(ws1);
+        Assert.Equal(Severity.Error, ws1[0].Severity);
+    }
+
+    [Fact]
+    public void SEC002_detects_target_blank_without_rel()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-002");
+        var content = "<a href=\"https://x.com\" target=\"_blank\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Single(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SEC002_skips_when_noopener_present()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-002");
+        var content = "<a href=\"https://x.com\" target=\"_blank\" rel=\"noopener\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SEC002_fix_appends_rel_when_missing()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-002");
+        var content = "<a href=\"https://x.com\" target=\"_blank\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var fixed1 = rule.Fix(content, ctx)!;
+        Assert.Contains("rel=\"noopener noreferrer\"", fixed1);
+    }
+
+    [Fact]
+    public void SEC002_fix_merges_into_existing_rel()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-002");
+        var content = "<a href=\"x\" target=\"_blank\" rel=\"author\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var fixed1 = rule.Fix(content, ctx)!;
+        Assert.Contains("rel=\"author noopener noreferrer\"", fixed1);
+    }
+
+    [Fact]
+    public void A11Y001_detects_img_without_alt()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "A11Y-001");
+        var content = "<img src=\"x.png\" />\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Single(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void A11Y001_skips_when_alt_present_even_empty()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "A11Y-001");
+        var content = "<img src=\"x.png\" alt=\"\" />\n<img src=\"y.png\" alt=\"y\" />\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SEC003_detects_localhost()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-003");
+        var content = "<a href=\"http://localhost:5000/api\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Single(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SEC003_detects_ip_loopback_and_local_tld()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-003");
+        var c1 = "<img src=\"https://127.0.0.1/x\" />\n";
+        var c2 = "<a href=\"https://api.local/v1\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Single(rule.Detect(c1, c1.Split('\n'), ctx));
+        Assert.Single(rule.Detect(c2, c2.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SEC003_skips_production_urls()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SEC-003");
+        var content = "<a href=\"https://www.example.com/x\">x</a>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void STYLE001_detects_inline_style()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "STYLE-001");
+        var content = "<div style=\"color:red;display:none\">x</div>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Single(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void STYLE001_does_not_match_data_style_attr()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "STYLE-001");
+        var content = "<div data-style=\"x\">y</div>\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void SCRIPT001_detects_inline_event_handlers()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SCRIPT-001");
+        var content =
+            "<button onclick=\"f()\">a</button>\n" +
+            "<input onchange=\"g(this)\" />\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        var issues = rule.Detect(content, content.Split('\n'), ctx).ToList();
+        Assert.Equal(2, issues.Count);
+    }
+
+    [Fact]
+    public void SCRIPT001_does_not_match_aspx_dataonly_attribute()
+    {
+        var rule = RuleRegistry.All.Single(r => r.Id == "SCRIPT-001");
+        // Custom attr that contains "on" prefix mais qui n'est pas un handler standard.
+        var content = "<input data-onclick-target=\"#x\" />\n";
+        var ctx = new RuleContext("ascx", "x.ascx");
+        Assert.Empty(rule.Detect(content, content.Split('\n'), ctx));
+    }
+
+    [Fact]
+    public void Config_glob_match_simple_patterns()
+    {
+        var c = new AspxLintConfig { Ignore = { "**/Generated/**", "*.bak" } };
+        Assert.True(c.IsIgnored("Foo/Generated/x.aspx"));
+        Assert.True(c.IsIgnored("a/b/Generated/c/d.aspx"));
+        Assert.True(c.IsIgnored("file.bak"));
+        Assert.False(c.IsIgnored("Foo/x.aspx"));
+        Assert.False(c.IsIgnored("Generated.aspx"));   // pas de slash, pas un dossier
+    }
+
+    [Fact]
     public void WS006_detects_trailing_blank_lines()
     {
         var rule = RuleRegistry.All.Single(r => r.Id == "WS-006");
