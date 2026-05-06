@@ -331,6 +331,11 @@ Le [workflow release.yml](.github/workflows/release.yml) exécute alors :
 Le workflow accepte aussi un déclenchement manuel via `workflow_dispatch`
 (saisir une version) — utile pour tester sans pousser sur NuGet.
 
+## Contribuer
+
+Voir [CONTRIBUTING.md](CONTRIBUTING.md) — comment lancer en local, ajouter
+une règle, écrire des tests, soumettre une PR. Lecture estimée : 5 minutes.
+
 ## Licence
 
 MIT.

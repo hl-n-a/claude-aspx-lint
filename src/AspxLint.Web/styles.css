@@ -1446,7 +1446,8 @@
 
   /* --- RESPONSIVE : tablette + telephone --- */
   /* En dessous de 900px, on empile les 3 colonnes (sidebar / code / issues)
-     et chacune devient scrollable independamment avec un cap de hauteur. */
+     et chacune devient scrollable independamment avec un cap de hauteur.
+     On cache aussi mini-map et split (inutiles sur ecran etroit). */
   @media (max-width: 900px) {
     main {
       grid-template-columns: 1fr;
@@ -1464,7 +1465,14 @@
       max-height: 35vh;
     }
     .code-panel { min-height: 45vh; }
+    .code-minimap { display: none; }
+    .code-area-wrap { grid-template-columns: 1fr; }
+    #btnSplit { display: none; }
+    /* La barre de recherche peut wrapper si trop d'elements. */
+    .search-bar, .search-bar-replace { flex-wrap: wrap; }
+    .search-bar input[type="text"] { flex: 1 1 60%; min-width: 180px; }
   }
+
   /* En dessous de 600px (telephone vertical), on serre le header
      et on cache les fioritures purement decoratives. */
   @media (max-width: 600px) {
@@ -1479,4 +1487,48 @@
     .sidebar { max-height: 25vh; }
     .issues-panel { max-height: 30vh; }
     .code-panel { min-height: 40vh; }
+
+    /* Touch targets : minimum 36px de hauteur tactile, recommandation Apple/Google. */
+    .btn.small { padding: 8px 12px; min-height: 36px; font-size: 12px; }
+    .filter-pill { padding: 8px 14px; min-height: 36px; }
+
+    /* Code actions : scroll horizontal plutot que wrap sur 4 lignes — plus propre. */
+    .code-actions {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      justify-content: flex-start;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .code-actions::-webkit-scrollbar { display: none; }
+    .code-actions .btn { flex: 0 0 auto; }
+
+    /* Footer : meme principe, scroll horizontal pour ne pas perdre d'options. */
+    .footer-actions {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Modaux : plus d'ecran utilise sur tel. */
+    .modal { max-height: 92vh; width: 95%; }
+    .modal-body { padding: 12px; }
+
+    /* Bulk bar : wrap propre, chaque action plein-largeur si besoin. */
+    .bulk-bar { flex-wrap: wrap; }
+    .bulk-bar-actions { flex: 1 1 100%; flex-wrap: wrap; }
+  }
+
+  /* En dessous de 380px (tres petits ecrans), on cache aussi le brand-name. */
+  @media (max-width: 380px) {
+    .brand-name { display: none; }
+    .stat-num { font-size: 14px; }
+    .filter-pill { padding: 6px 10px; font-size: 11px; }
+  }
+
+  /* Pointeur tactile : tous les boutons interactifs ont un feedback visible. */
+  @media (hover: none) and (pointer: coarse) {
+    .btn:active { background: var(--bg-3); transform: scale(0.97); }
+    .filter-pill:active { transform: scale(0.97); }
+    .file-item:active { background: var(--bg-3); }
   }
