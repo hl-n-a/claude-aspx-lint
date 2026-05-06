@@ -422,4 +422,149 @@ public class CliRunnerTests
         var (code, _, _) = Run("scan", tmp.Path);
         Assert.Equal(CliRunner.ExitOk, code);
     }
+
+    // ====== Error paths (couverture des branches d'usage incorrect) ======
+
+    [Fact]
+    public void Scan_without_path_prints_usage()
+    {
+        var (code, _, stderr) = Run("scan");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Scan_unknown_arg_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("scan", tmp.Path, "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    [Fact]
+    public void Scan_invalid_severity_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("scan", tmp.Path, "--severity", "criticat");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("severity", stderr);
+    }
+
+    [Fact]
+    public void Scan_invalid_lang_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("scan", tmp.Path, "--lang", "klingon");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("lang", stderr);
+    }
+
+    [Fact]
+    public void Fix_without_path_prints_usage()
+    {
+        var (code, _, stderr) = Run("fix");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Fix_unknown_arg_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("fix", tmp.Path, "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    [Fact]
+    public void Fix_missing_directory_returns_2()
+    {
+        var fake = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var (code, _, _) = Run("fix", fake);
+        Assert.Equal(CliRunner.ExitError, code);
+    }
+
+    [Fact]
+    public void Watch_without_path_prints_usage()
+    {
+        var (code, _, stderr) = Run("watch");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Watch_unknown_arg_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("watch", tmp.Path, "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    [Fact]
+    public void Watch_invalid_severity_returns_1()
+    {
+        using var tmp = MakeFixture();
+        var (code, _, stderr) = Run("watch", tmp.Path, "--severity", "criticat");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("severity", stderr);
+    }
+
+    [Fact]
+    public void Watch_missing_directory_returns_2()
+    {
+        var fake = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var (code, _, _) = Run("watch", fake);
+        Assert.Equal(CliRunner.ExitError, code);
+    }
+
+    // ====== pre-commit ======
+
+    [Fact]
+    public void PreCommit_unknown_arg_returns_1()
+    {
+        var (code, _, stderr) = Run("pre-commit", "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    [Fact]
+    public void PreCommit_invalid_severity_returns_1()
+    {
+        var (code, _, stderr) = Run("pre-commit", "--severity", "criticat");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("severity", stderr);
+    }
+
+    // ====== --version / --help ======
+
+    [Fact]
+    public void Version_flag_prints_a_version()
+    {
+        var (code, stdout, _) = Run("--version");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Matches(@"\d+\.\d+", stdout);
+    }
+
+    [Fact]
+    public void Help_flag_prints_usage()
+    {
+        var (code, stdout, _) = Run("--help");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("aspx-lint", stdout);
+        Assert.Contains("scan", stdout);
+        Assert.Contains("fix", stdout);
+    }
+
+    // ====== --no-color (exercice la branche noColor du parser d'args) ======
+
+    [Fact]
+    public void Scan_no_color_returns_ok_or_issues()
+    {
+        using var tmp = MakeFixture();
+        var (code, stdout, _) = Run("scan", tmp.Path, "--no-color");
+        Assert.True(code == CliRunner.ExitOk || code == CliRunner.ExitIssuesFound);
+        Assert.NotEmpty(stdout);
+    }
 }

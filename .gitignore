@@ -26,6 +26,7 @@
 TestResults/
 *.trx
 coverage/
+coverage-report/
 *.nupkg
 nupkg/
 
