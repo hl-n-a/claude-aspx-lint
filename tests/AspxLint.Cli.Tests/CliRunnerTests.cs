@@ -219,6 +219,143 @@ public class CliRunnerTests
         Assert.True(found, "La custom rule CUSTOM-TODO devrait avoir matche.");
     }
 
+    // ====== fix --stdin (pour integrations IDE) ======
+
+    /// <summary>
+    /// Run la CLI avec un buffer stdin synthetique. Le helper Run() de
+    /// cette classe ne supporte pas stdin ; on utilise CliRunner.RunAsync
+    /// directement avec un Console.SetIn temporaire.
+    /// </summary>
+    private static (int exit, string stdout, string stderr) RunWithStdin(string stdinContent, params string[] args)
+    {
+        var origIn = Console.In;
+        try
+        {
+            Console.SetIn(new StringReader(stdinContent));
+            var o = new StringWriter();
+            var e = new StringWriter();
+            var code = CliRunner.RunAsync(args, o, e).GetAwaiter().GetResult();
+            return (code, o.ToString(), e.ToString());
+        }
+        finally
+        {
+            Console.SetIn(origIn);
+        }
+    }
+
+    [Fact]
+    public void FixStdin_applies_targeted_rule_only()
+    {
+        // <br> matche TAG-001 et "line   " matche WS-001. Avec --rule TAG-001
+        // seul TAG-001 doit etre applique. WS-001 reste.
+        var (code, stdout, _) = RunWithStdin(
+            "<%@ Page %>\n<br>\nline   \n",
+            "fix", "--stdin", "--ext", "aspx", "--rule", "TAG-001");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("<br />", stdout);
+        Assert.Contains("line   ", stdout);   // WS-001 pas applique
+    }
+
+    [Fact]
+    public void FixStdin_applies_all_when_no_rule_specified()
+    {
+        var (code, stdout, _) = RunWithStdin(
+            "<br>\nline   \n",
+            "fix", "--stdin", "--ext", "aspx");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("<br />", stdout);
+        Assert.DoesNotContain("line   \n", stdout);   // WS-001 applique
+    }
+
+    [Fact]
+    public void FixStdin_unknown_rule_returns_1()
+    {
+        var (code, _, stderr) = RunWithStdin("<br>\n", "fix", "--stdin", "--ext", "aspx", "--rule", "FAKE-999");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("FAKE-999", stderr);
+    }
+
+    [Fact]
+    public void FixStdin_clean_content_returns_unchanged()
+    {
+        // Contenu deja propre : aucun changement, mais on retourne 0 et
+        // l'integralite du buffer original.
+        var input = "<%@ Page Language=\"C#\" %>\n";
+        var (code, stdout, _) = RunWithStdin(input, "fix", "--stdin", "--ext", "aspx");
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Equal(input, stdout);
+    }
+
+    [Fact]
+    public void FixStdin_unknown_arg_returns_1()
+    {
+        var (code, _, stderr) = RunWithStdin("x", "fix", "--stdin", "--ext", "aspx", "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
+    // ====== rules (pour integrations IDE) ======
+
+    [Fact]
+    public void Rules_returns_json_with_all_rules()
+    {
+        var (code, stdout, _) = Run("rules");
+        Assert.Equal(CliRunner.ExitOk, code);
+
+        var doc = JsonDocument.Parse(stdout);
+        var rules = doc.RootElement.GetProperty("rules");
+        Assert.Equal(JsonValueKind.Array, rules.ValueKind);
+        Assert.Equal(35, rules.GetArrayLength());
+
+        var first = rules[0];
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("id").GetString()));
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("name").GetString()));
+        Assert.False(string.IsNullOrEmpty(first.GetProperty("description").GetString()));
+        Assert.Contains(first.GetProperty("severity").GetString(),
+            new[] { "error", "warning", "info" });
+        // hasFix doit etre un bool
+        Assert.True(first.GetProperty("hasFix").ValueKind == JsonValueKind.True
+                 || first.GetProperty("hasFix").ValueKind == JsonValueKind.False);
+    }
+
+    [Fact]
+    public void Rules_with_lang_en_returns_translated_descriptions()
+    {
+        var (_, stdoutFr, _) = Run("rules");
+        var (_, stdoutEn, _) = Run("rules", "--lang", "en");
+
+        var fr = JsonDocument.Parse(stdoutFr).RootElement.GetProperty("rules");
+        var en = JsonDocument.Parse(stdoutEn).RootElement.GetProperty("rules");
+
+        // Au moins une regle doit avoir un nom different en EN qu'en FR.
+        bool anyDifferent = false;
+        for (int i = 0; i < fr.GetArrayLength(); i++)
+        {
+            if (fr[i].GetProperty("name").GetString() != en[i].GetProperty("name").GetString())
+            {
+                anyDifferent = true;
+                break;
+            }
+        }
+        Assert.True(anyDifferent, "Aucune traduction EN detectee — Translations.cs vide ?");
+    }
+
+    [Fact]
+    public void Rules_invalid_lang_returns_1()
+    {
+        var (code, _, stderr) = Run("rules", "--lang", "klingon");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("lang", stderr);
+    }
+
+    [Fact]
+    public void Rules_unknown_arg_returns_1()
+    {
+        var (code, _, stderr) = Run("rules", "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
     // ====== analyze (pour integrations IDE) ======
 
     [Fact]

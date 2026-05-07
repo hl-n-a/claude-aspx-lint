@@ -12,19 +12,34 @@ export interface LintIssue {
     hint: string;
 }
 
+export interface RuleMetadata {
+    id: string;
+    name: string;
+    description: string;
+    severity: 'error' | 'warning' | 'info';
+    hasFix: boolean;
+}
+
 interface AnalyzeResponse {
     ext: string;
     issues: LintIssue[];
+}
+
+interface RulesResponse {
+    rules: RuleMetadata[];
 }
 
 /**
  * Wrapper autour du binaire `aspx-lint` (CLI). Les frontends VSCode passent
  * par cette classe pour ne jamais traiter les details d'argv ou de parsing.
  *
- * Strategie : on fait `aspx-lint analyze --ext <ext> --stdin` avec le buffer
- * en cours sur stdin. Pas de fichier temp, pas de race condition avec le save.
+ * Toutes les operations sont stateless et stdin/stdout-pipees : pas de
+ * fichiers temp, pas de race condition avec le save, pas de touche au
+ * disque sur les fichiers en cours d'edition.
  */
 export class Linter {
+    private rulesCache: Map<string, RuleMetadata> | null = null;
+
     constructor(private output: vscode.OutputChannel) {}
 
     private resolveBinary(): string {
@@ -32,96 +47,119 @@ export class Linter {
         return cfg.get<string>('path', 'aspx-lint');
     }
 
+    private workCwd(filePath: string): string {
+        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(filePath);
+    }
+
     /**
-     * Analyse un buffer en memoire. Renvoie la liste d'issues (ou erreur si
-     * le binaire crashe / n'est pas trouve).
+     * Pipe `content` sur stdin de `aspx-lint <args>`, retourne (stdout, stderr,
+     * exitCode). Centralise la logique de spawn + gestion d'erreur.
      */
-    async analyze(content: string, filePath: string): Promise<LintIssue[]> {
-        const ext = path.extname(filePath).toLowerCase().replace('.', '') || 'aspx';
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(filePath);
-
+    private exec(args: string[], stdin: string | null, cwd?: string): Promise<{ stdout: string; stderr: string; code: number }> {
         const binary = this.resolveBinary();
-        const args = ['analyze', '--ext', ext, '--stdin'];
-
-        return new Promise<LintIssue[]>((resolve, reject) => {
+        return new Promise((resolve, reject) => {
             let proc: ReturnType<typeof spawn>;
             try {
-                proc = spawn(binary, args, { cwd });
+                proc = spawn(binary, args, { cwd: cwd ?? process.cwd() });
             } catch (err: any) {
                 return reject(new Error(
                     `Cannot launch '${binary}'. Install with: dotnet tool install -g aspx-lint`
                 ));
             }
 
-            let stdoutBuf = '';
-            let stderrBuf = '';
-            proc.stdout!.on('data', (d: Buffer) => { stdoutBuf += d.toString('utf8'); });
-            proc.stderr!.on('data', (d: Buffer) => { stderrBuf += d.toString('utf8'); });
+            let outBuf = '';
+            let errBuf = '';
+            proc.stdout!.on('data', (d: Buffer) => { outBuf += d.toString('utf8'); });
+            proc.stderr!.on('data', (d: Buffer) => { errBuf += d.toString('utf8'); });
+            proc.on('error', err => reject(new Error(
+                `aspx-lint launch failed: ${err.message}. Is it installed (dotnet tool install -g aspx-lint) and in PATH?`
+            )));
+            proc.on('close', code => resolve({ stdout: outBuf, stderr: errBuf, code: code ?? 0 }));
 
-            proc.on('error', err => {
-                reject(new Error(
-                    `aspx-lint launch failed: ${err.message}. Is the binary installed (dotnet tool install -g aspx-lint) and in PATH?`
-                ));
-            });
-
-            proc.on('close', code => {
-                // Exit codes : 0 = clean, 1 = issues found, 2 = error.
-                if (code === 2) {
-                    return reject(new Error(`aspx-lint error: ${stderrBuf.trim() || 'unknown'}`));
-                }
-                try {
-                    const parsed = JSON.parse(stdoutBuf) as AnalyzeResponse;
-                    resolve(parsed.issues ?? []);
-                } catch (err: any) {
-                    this.output.appendLine(`Failed to parse output: ${stdoutBuf.slice(0, 500)}`);
-                    reject(new Error(`Cannot parse aspx-lint output: ${err.message}`));
-                }
-            });
-
-            // Inject stdin then close.
-            proc.stdin!.write(content, 'utf8');
+            if (stdin !== null) {
+                proc.stdin!.write(stdin, 'utf8');
+            }
             proc.stdin!.end();
         });
     }
 
     /**
-     * Lance un scan complet d'un dossier (commande `scan`). Renvoie le rapport
-     * texte humain-lisible (le format JSON est reserve a `analyze`).
+     * Analyse un buffer en memoire. Renvoie la liste d'issues.
      */
-    async scan(rootPath: string): Promise<string> {
-        const binary = this.resolveBinary();
-        return new Promise<string>((resolve, reject) => {
-            const proc = spawn(binary, ['scan', rootPath, '--no-color'], { cwd: rootPath });
-            let buf = '';
-            proc.stdout!.on('data', (d: Buffer) => { buf += d.toString('utf8'); });
-            proc.stderr!.on('data', (d: Buffer) => { buf += d.toString('utf8'); });
-            proc.on('error', reject);
-            proc.on('close', code => {
-                if (code === 2) reject(new Error(buf || 'aspx-lint scan failed'));
-                else resolve(buf);
-            });
-        });
+    async analyze(content: string, filePath: string): Promise<LintIssue[]> {
+        const ext = path.extname(filePath).toLowerCase().replace('.', '') || 'aspx';
+        const cwd = this.workCwd(filePath);
+        const { stdout, stderr, code } = await this.exec(
+            ['analyze', '--ext', ext, '--stdin'], content, cwd);
+
+        // exit codes : 0 = clean, 1 = issues found, 2 = error.
+        if (code === 2) {
+            throw new Error(`aspx-lint error: ${stderr.trim() || 'unknown'}`);
+        }
+        try {
+            const parsed = JSON.parse(stdout) as AnalyzeResponse;
+            return parsed.issues ?? [];
+        } catch (err: any) {
+            this.output.appendLine(`Failed to parse analyze output: ${stdout.slice(0, 500)}`);
+            throw new Error(`Cannot parse aspx-lint output: ${err.message}`);
+        }
     }
 
     /**
-     * Lance `aspx-lint fix <dir>` sur un dossier. La commande applique tous
-     * les fixes auto-fixables. Pour des fixes selectifs, on pourra ajouter
-     * `--rule <id>` en argument.
+     * Applique le fix d'une regle (ou tous les fixes auto-fixables si
+     * ruleId est null) sur un buffer en memoire. Renvoie le contenu corrige.
+     * Pas de touche au disque.
      */
-    async fixDirectory(dirPath: string, ruleId?: string): Promise<string> {
-        const binary = this.resolveBinary();
-        const args = ['fix', dirPath];
+    async fixBuffer(content: string, filePath: string, ruleId?: string): Promise<string> {
+        const ext = path.extname(filePath).toLowerCase().replace('.', '') || 'aspx';
+        const cwd = this.workCwd(filePath);
+        const args = ['fix', '--stdin', '--ext', ext];
         if (ruleId) args.push('--rule', ruleId);
-        return new Promise<string>((resolve, reject) => {
-            const proc = spawn(binary, args, { cwd: dirPath });
-            let buf = '';
-            proc.stdout!.on('data', (d: Buffer) => { buf += d.toString('utf8'); });
-            proc.stderr!.on('data', (d: Buffer) => { buf += d.toString('utf8'); });
-            proc.on('error', reject);
-            proc.on('close', code => {
-                if (code === 2) reject(new Error(buf || 'aspx-lint fix failed'));
-                else resolve(buf);
-            });
-        });
+        const { stdout, stderr, code } = await this.exec(args, content, cwd);
+
+        if (code === 2) {
+            throw new Error(`aspx-lint error: ${stderr.trim() || 'unknown'}`);
+        }
+        if (code === 1) {
+            // Regle inconnue / argument invalide.
+            throw new Error(stderr.trim() || 'aspx-lint fix returned exit 1');
+        }
+        return stdout;
+    }
+
+    /**
+     * Charge les metadonnees de toutes les regles depuis `aspx-lint rules`.
+     * Cache en memoire (les regles ne changent pas a chaud). Utile pour les
+     * hovers, la doc, et tout ce qui veut afficher la description complete.
+     */
+    async getRules(): Promise<Map<string, RuleMetadata>> {
+        if (this.rulesCache) return this.rulesCache;
+        try {
+            const { stdout, code } = await this.exec(['rules'], null);
+            if (code !== 0) return new Map();
+            const parsed = JSON.parse(stdout) as RulesResponse;
+            this.rulesCache = new Map(parsed.rules.map(r => [r.id, r]));
+            return this.rulesCache;
+        } catch (err: any) {
+            this.output.appendLine(`Failed to load rules: ${err.message}`);
+            return new Map();
+        }
+    }
+
+    /**
+     * Reinitialise le cache des regles. Appele apres une mise a jour du
+     * binaire (peu probable a chaud mais utile pour les tests).
+     */
+    invalidateRulesCache() { this.rulesCache = null; }
+
+    /**
+     * Lance un scan complet d'un dossier (commande `scan`). Renvoie le rapport
+     * texte humain-lisible.
+     */
+    async scan(rootPath: string): Promise<string> {
+        const { stdout, stderr, code } = await this.exec(
+            ['scan', rootPath, '--no-color'], null, rootPath);
+        if (code === 2) throw new Error(stderr.trim() || 'aspx-lint scan failed');
+        return stdout + (stderr ? '\n' + stderr : '');
     }
 }

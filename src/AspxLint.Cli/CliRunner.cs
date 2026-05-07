@@ -39,6 +39,7 @@ public static class CliRunner
                 "scan"        => await ScanAsync(args[1..], stdout, stderr),
                 "fix"         => await FixAsync(args[1..], stdout, stderr),
                 "analyze"     => await AnalyzeAsync(args[1..], stdout, stderr),
+                "rules"       => RulesAsync(args[1..], stdout, stderr),
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
                 "watch"       => await WatchAsync(args[1..], stdout, stderr),
                 "init"        => await InitAsync(args[1..], stdout, stderr),
@@ -191,7 +192,15 @@ public static class CliRunner
         if (args.Length == 0)
         {
             stderr.WriteLine("Usage: aspx-lint fix <path> [--rule <id>] [--dry-run]");
+            stderr.WriteLine("       aspx-lint fix --stdin --ext <ext> [--rule <id>]   (lit stdin, ecrit stdout)");
             return ExitIssuesFound;
+        }
+
+        // Mode stdin : applique le fix sur le contenu lu depuis stdin et
+        // ecrit le resultat sur stdout. Conçu pour les integrations IDE.
+        if (args.Contains("--stdin"))
+        {
+            return await FixStdinAsync(args, stdout, stderr);
         }
 
         var path = args[0];
@@ -283,7 +292,9 @@ public static class CliRunner
         o.WriteLine("aspx-lint — analyseur de fichiers ASP.NET Web Forms");
         o.WriteLine();
         o.WriteLine("Usage:");
-        o.WriteLine("  aspx-lint analyze --ext <ext> (--stdin | <file>)  [JSON, pour IDE / outils]");
+        o.WriteLine("  aspx-lint analyze --ext <ext> (--stdin | <file>)        [JSON, pour IDE]");
+        o.WriteLine("  aspx-lint fix --stdin --ext <ext> [--rule <id>]          [stdin -> stdout, pour IDE]");
+        o.WriteLine("  aspx-lint rules [--lang fr|en]                           [JSON metadata des regles]");
         o.WriteLine("  aspx-lint scan <path> [--json | --sarif | --junit | --codeclimate | --tap]");
         o.WriteLine("                       [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
@@ -822,8 +833,10 @@ public static class CliRunner
         string virtualPath;
         if (useStdin)
         {
-            using var sr = new StreamReader(Console.OpenStandardInput(), System.Text.Encoding.UTF8);
-            content = await sr.ReadToEndAsync();
+            // Console.In (vs OpenStandardInput) :
+            //  - respecte les pipes shell (aspx-lint fix --stdin < file.aspx)
+            //  - permet a Console.SetIn de l'intercepter dans les unit tests
+            content = await Console.In.ReadToEndAsync();
             virtualPath = $"stdin.{ext}";
         }
         else
@@ -880,5 +893,138 @@ public static class CliRunner
         stdout.WriteLine(json);
 
         return issues.Count > 0 ? ExitIssuesFound : ExitOk;
+    }
+
+    /// <summary>
+    /// Mode stdin de FixAsync : lit du contenu depuis stdin, applique
+    /// les fixes (toutes les regles auto-fixables ou juste --rule X), et
+    /// ecrit le resultat sur stdout. Concu pour les integrations IDE qui
+    /// veulent appliquer un fix sur le buffer en cours sans toucher au
+    /// disque.
+    ///
+    /// Convention exit code : 0 si on a applique au moins un fix OU si le
+    /// contenu etait deja propre (le buffer recu sur stdout est valide
+    /// dans les deux cas). 1 sur regle inconnue, 2 sur erreur d'IO.
+    /// </summary>
+    private static async Task<int> FixStdinAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        string ext = "aspx";
+        string? onlyRule = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--stdin":
+                    break;
+                case "--ext" when i + 1 < args.Length:
+                    ext = args[++i].TrimStart('.').ToLowerInvariant();
+                    break;
+                case "--rule" when i + 1 < args.Length:
+                    onlyRule = args[++i];
+                    break;
+                default:
+                    if (args[i].StartsWith("--"))
+                    {
+                        stderr.WriteLine($"Argument inconnu : {args[i]}");
+                        return ExitIssuesFound;
+                    }
+                    break;
+            }
+        }
+
+        var rules = onlyRule is null
+            ? RuleRegistry.All.Where(r => r.HasFix).ToList()
+            : RuleRegistry.All.Where(r => r.HasFix && r.Id.Equals(onlyRule, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (rules.Count == 0)
+        {
+            stderr.WriteLine(onlyRule is null
+                ? "Aucune regle auto-fixable enregistree."
+                : $"Regle inconnue ou non fixable : {onlyRule}");
+            return ExitIssuesFound;
+        }
+
+        string content;
+        try
+        {
+            content = await Console.In.ReadToEndAsync();
+        }
+        catch (Exception ex)
+        {
+            stderr.WriteLine($"Lecture stdin echouee : {ex.Message}");
+            return ExitError;
+        }
+
+        var ctx = new RuleContext(ext, $"stdin.{ext}");
+
+        // Memes 5 passes que FixAsync pour converger.
+        for (int pass = 0; pass < 5; pass++)
+        {
+            var before = content;
+            foreach (var rule in rules)
+            {
+                var fixedContent = rule.Fix(content, ctx);
+                if (fixedContent != null && fixedContent != content)
+                    content = fixedContent;
+            }
+            if (content == before) break;
+        }
+
+        // stdout.Write (pas WriteLine) : on ne pollue pas le contenu avec
+        // un \n parasite a la fin. Si le content avait deja un trailing \n
+        // il reste, sinon il n'y en a pas — fidele au comportement attendu.
+        await stdout.WriteAsync(content);
+        return ExitOk;
+    }
+
+    /// <summary>
+    /// rules [--json] [--lang fr|en] : dump la liste des regles avec
+    /// metadata (id, name, severity, hasFix, description). Concu pour
+    /// les integrations IDE qui affichent les descriptions au hover.
+    ///
+    /// JSON par defaut : la sortie est consommee par des outils.
+    /// </summary>
+    private static int RulesAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        string? lang = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--json":
+                    // Format par defaut, accepte pour clarte.
+                    break;
+                case "--lang" when i + 1 < args.Length:
+                    lang = args[++i];
+                    if (!Translations.AvailableLocales.Any(l => l.Equals(lang, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        stderr.WriteLine($"--lang doit etre l'une de : {string.Join(", ", Translations.AvailableLocales)}");
+                        return ExitIssuesFound;
+                    }
+                    break;
+                default:
+                    stderr.WriteLine($"Argument inconnu : {args[i]}");
+                    return ExitIssuesFound;
+            }
+        }
+
+        var rules = RuleRegistry.All.Select(r =>
+        {
+            var (name, description) = Translations.Resolve(r, lang);
+            return new
+            {
+                id = r.Id,
+                name,
+                description,
+                severity = r.Severity.ToString().ToLowerInvariant(),
+                hasFix = r.HasFix
+            };
+        }).ToList();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new { rules },
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+        stdout.WriteLine(json);
+        return ExitOk;
     }
 }

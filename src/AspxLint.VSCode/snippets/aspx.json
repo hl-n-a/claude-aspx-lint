@@ -1,0 +1,187 @@
+{
+  "Page directive": {
+    "prefix": "@page",
+    "scope": "aspx",
+    "body": [
+      "<%@ Page Language=\"C#\" AutoEventWireup=\"true\" CodeBehind=\"${1:Default}.aspx.cs\" Inherits=\"${2:WebApplication.${1}}\" %>",
+      "$0"
+    ],
+    "description": "Directive @Page pour un fichier .aspx avec code-behind"
+  },
+  "Page directive (master)": {
+    "prefix": "@pagewithmaster",
+    "scope": "aspx",
+    "body": [
+      "<%@ Page Language=\"C#\" AutoEventWireup=\"true\" CodeBehind=\"${1:Default}.aspx.cs\" Inherits=\"${2:WebApplication.${1}}\" MasterPageFile=\"~/${3:Site.Master}\" %>",
+      "$0"
+    ],
+    "description": "Directive @Page liée à une master page"
+  },
+  "Control directive": {
+    "prefix": "@control",
+    "scope": "aspx",
+    "body": [
+      "<%@ Control Language=\"C#\" AutoEventWireup=\"true\" CodeBehind=\"${1:UserControl}.ascx.cs\" Inherits=\"${2:WebApplication.${1}}\" %>",
+      "$0"
+    ],
+    "description": "Directive @Control pour un user control .ascx"
+  },
+  "Master directive": {
+    "prefix": "@master",
+    "scope": "aspx",
+    "body": [
+      "<%@ Master Language=\"C#\" AutoEventWireup=\"true\" CodeBehind=\"${1:Site}.master.cs\" Inherits=\"${2:WebApplication.${1}}\" %>",
+      "$0"
+    ],
+    "description": "Directive @Master pour une master page"
+  },
+  "Register directive": {
+    "prefix": "@register",
+    "scope": "aspx",
+    "body": [
+      "<%@ Register Src=\"~/${1:Controls/Foo.ascx}\" TagPrefix=\"${2:uc}\" TagName=\"${3:Foo}\" %>",
+      "$0"
+    ],
+    "description": "Directive @Register pour un user control"
+  },
+  "Server expression": {
+    "prefix": "<%=",
+    "scope": "aspx",
+    "body": "<%= ${1:expression} %>$0",
+    "description": "Bloc d'expression server (équivalent Response.Write)"
+  },
+  "Server data binding": {
+    "prefix": "<%#",
+    "scope": "aspx",
+    "body": "<%# ${1:Eval(\"${2:Property}\")} %>$0",
+    "description": "Expression de data-binding (DataBind)"
+  },
+  "Server statement block": {
+    "prefix": "<%",
+    "scope": "aspx",
+    "body": [
+      "<%",
+      "    ${1:// code}",
+      "%>$0"
+    ],
+    "description": "Bloc de code C# côté serveur"
+  },
+  "Server-side comment": {
+    "prefix": "<%--",
+    "scope": "aspx",
+    "body": "<%-- ${1:commentaire} --%>$0",
+    "description": "Commentaire côté serveur (n'est pas envoyé au client)"
+  },
+  "asp:Label": {
+    "prefix": "asplabel",
+    "scope": "aspx",
+    "body": "<asp:Label ID=\"${1:Label1}\" runat=\"server\" Text=\"${2:Texte}\" />$0",
+    "description": "Contrôle Label"
+  },
+  "asp:TextBox": {
+    "prefix": "asptextbox",
+    "scope": "aspx",
+    "body": "<asp:TextBox ID=\"${1:TextBox1}\" runat=\"server\" />$0",
+    "description": "Contrôle TextBox"
+  },
+  "asp:Button": {
+    "prefix": "aspbutton",
+    "scope": "aspx",
+    "body": "<asp:Button ID=\"${1:Button1}\" runat=\"server\" Text=\"${2:OK}\" OnClick=\"${1}_Click\" />$0",
+    "description": "Contrôle Button avec handler de clic"
+  },
+  "asp:DropDownList": {
+    "prefix": "aspddl",
+    "scope": "aspx",
+    "body": [
+      "<asp:DropDownList ID=\"${1:DropDownList1}\" runat=\"server\">",
+      "    <asp:ListItem Value=\"${2:value}\" Text=\"${3:Text}\" />",
+      "</asp:DropDownList>$0"
+    ],
+    "description": "Contrôle DropDownList"
+  },
+  "asp:ContentPlaceHolder": {
+    "prefix": "aspplaceholder",
+    "scope": "aspx",
+    "body": [
+      "<asp:ContentPlaceHolder ID=\"${1:MainContent}\" runat=\"server\">",
+      "    $0",
+      "</asp:ContentPlaceHolder>"
+    ],
+    "description": "Zone à remplacer dans une master page"
+  },
+  "asp:Content": {
+    "prefix": "aspcontent",
+    "scope": "aspx",
+    "body": [
+      "<asp:Content ID=\"${1:Content1}\" ContentPlaceHolderID=\"${2:MainContent}\" runat=\"server\">",
+      "    $0",
+      "</asp:Content>"
+    ],
+    "description": "Bloc Content lié à un ContentPlaceHolder du master"
+  },
+  "asp:Repeater": {
+    "prefix": "asprepeater",
+    "scope": "aspx",
+    "body": [
+      "<asp:Repeater ID=\"${1:Repeater1}\" runat=\"server\">",
+      "    <ItemTemplate>",
+      "        $0",
+      "    </ItemTemplate>",
+      "</asp:Repeater>"
+    ],
+    "description": "Contrôle Repeater avec ItemTemplate"
+  },
+  "asp:GridView": {
+    "prefix": "aspgrid",
+    "scope": "aspx",
+    "body": [
+      "<asp:GridView ID=\"${1:GridView1}\" runat=\"server\" AutoGenerateColumns=\"false\" DataKeyNames=\"${2:Id}\">",
+      "    <Columns>",
+      "        <asp:BoundField DataField=\"${3:Property}\" HeaderText=\"${4:Header}\" />$0",
+      "    </Columns>",
+      "</asp:GridView>"
+    ],
+    "description": "Contrôle GridView avec colonnes BoundField"
+  },
+  "Form runat server": {
+    "prefix": "aspform",
+    "scope": "aspx",
+    "body": [
+      "<form id=\"${1:form1}\" runat=\"server\">",
+      "    $0",
+      "</form>"
+    ],
+    "description": "Form avec runat=\"server\" (obligatoire pour les contrôles serveur)"
+  },
+  "ScriptManager": {
+    "prefix": "aspscriptmgr",
+    "scope": "aspx",
+    "body": "<asp:ScriptManager ID=\"${1:ScriptManager1}\" runat=\"server\" />$0",
+    "description": "ScriptManager (un seul par page, requis pour UpdatePanel/asp:Timer)"
+  },
+  "UpdatePanel": {
+    "prefix": "aspupdatepanel",
+    "scope": "aspx",
+    "body": [
+      "<asp:UpdatePanel ID=\"${1:UpdatePanel1}\" runat=\"server\">",
+      "    <ContentTemplate>",
+      "        $0",
+      "    </ContentTemplate>",
+      "</asp:UpdatePanel>"
+    ],
+    "description": "UpdatePanel pour les postbacks AJAX partiels"
+  },
+  "aspx-lint disable line": {
+    "prefix": "aspxdisable",
+    "scope": "aspx",
+    "body": "<%-- aspx-lint disable ${1:RULE-ID} --%>$0",
+    "description": "Désactive aspx-lint sur la ligne suivante (pour une règle précise)"
+  },
+  "aspx-lint disable file": {
+    "prefix": "aspxdisablefile",
+    "scope": "aspx",
+    "body": "<%-- aspx-lint disable-file${1: RULE-ID} --%>$0",
+    "description": "Désactive aspx-lint sur tout le fichier (RULE-ID optionnel)"
+  }
+}

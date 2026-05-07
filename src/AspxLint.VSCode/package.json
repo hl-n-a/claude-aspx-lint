@@ -54,6 +54,16 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "aspx",
+        "path": "./snippets/aspx.json"
+      },
+      {
+        "language": "html",
+        "path": "./snippets/aspx.json"
+      }
+    ],
     "commands": [
       {
         "command": "aspxLint.scanWorkspace",

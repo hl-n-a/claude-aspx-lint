@@ -19,11 +19,27 @@ un binaire spécifique, configure `aspxLint.path` dans `settings.json`.
 
 ## Fonctionnalités
 
-- **Diagnostics inline** sur ouverture et sauvegarde des fichiers supportés.
-- **Code actions** (Ctrl+. / Cmd+.) → applique l'auto-fix d'une règle.
+- **Diagnostics inline** — squigglies dans l'éditeur sur ouverture et
+  sauvegarde des fichiers supportés. Lint à la frappe optionnel
+  (debounced 500ms, opt-in via `aspxLint.lintOnType`).
+- **Hover** — survoler une diagnostic affiche la description complète
+  de la règle, sa sévérité, et si elle est auto-fixable. Les noms
+  de règles sont traduits selon la langue VS Code.
+- **Code actions** (Ctrl+. / Cmd+.) — pour chaque issue, propose
+  *« appliquer le fix de RULE-ID »*. Le fix est appliqué **uniquement
+  sur le buffer courant**, pas sur le disque ni sur les autres fichiers.
+  Undoable en un Ctrl+Z.
+- **Format Document** (Shift+Alt+F / Format on Save) — applique tous
+  les auto-fixes via le DocumentFormattingEditProvider standard. Tu peux
+  activer `editor.formatOnSave` dans tes settings pour que ça tourne à
+  chaque save.
+- **Snippets** — 21 patterns ASPX courants : `@page`, `@control`, `@master`,
+  `@register`, `<%=`, `<%#`, `<%--`, `aspbutton`, `asplabel`, `asptextbox`,
+  `aspddl`, `aspgrid`, `asprepeater`, `aspplaceholder`, `aspcontent`,
+  `aspform`, `aspscriptmgr`, `aspupdatepanel`, `aspxdisable`, etc.
 - **Commandes** (Ctrl+Shift+P) :
   - `aspx-lint: Scan workspace` — rapport complet du dossier ouvert
-  - `aspx-lint: Fix current file` — applique tous les auto-fixes
+  - `aspx-lint: Fix current file` — applique tous les auto-fixes au buffer
   - `aspx-lint: Show output` — ouvre le panneau de logs
 
 ## Configuration
