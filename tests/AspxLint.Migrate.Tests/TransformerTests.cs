@@ -230,6 +230,61 @@ public class TransformerTests
         Assert.Equal(1, report.CountBySeverity(MigrationSeverity.Manual));
     }
 
+    // ============= RunatServerTransformer =============
+
+    [Fact]
+    public void RunatServer_strips_attribute_from_form_tag()
+    {
+        var t = new RunatServerTransformer();
+        var (output, report) = Run(t, "<form id=\"f1\" runat=\"server\">");
+        Assert.Equal("<form id=\"f1\">", output);
+        Assert.True(report.CountBySeverity(MigrationSeverity.Auto) >= 1);
+    }
+
+    [Fact]
+    public void RunatServer_strips_attribute_from_head_tag()
+    {
+        var t = new RunatServerTransformer();
+        var (output, _) = Run(t, "<head id=\"Head1\" runat=\"server\">");
+        Assert.Equal("<head id=\"Head1\">", output);
+    }
+
+    [Fact]
+    public void RunatServer_handles_single_quotes()
+    {
+        var t = new RunatServerTransformer();
+        var (output, _) = Run(t, "<body runat='server'>");
+        Assert.Equal("<body>", output);
+    }
+
+    [Fact]
+    public void RunatServer_does_not_touch_asp_controls()
+    {
+        // <asp:Label> ne doit PAS etre touche — il sera transforme en
+        // Phase 3. Strip runat="server" maintenant casserait le sens.
+        var t = new RunatServerTransformer();
+        var input = "<asp:Label ID=\"L1\" runat=\"server\" Text=\"x\" />";
+        var (output, _) = Run(t, input);
+        Assert.Equal(input, output);
+    }
+
+    [Fact]
+    public void RunatServer_preserves_other_attributes()
+    {
+        var t = new RunatServerTransformer();
+        var (output, _) = Run(t, "<form id=\"f\" runat=\"server\" method=\"post\" action=\"/x\">");
+        Assert.Equal("<form id=\"f\" method=\"post\" action=\"/x\">", output);
+    }
+
+    [Fact]
+    public void RunatServer_no_op_when_attribute_absent()
+    {
+        var t = new RunatServerTransformer();
+        var (output, report) = Run(t, "<div>plain</div>");
+        Assert.Equal("<div>plain</div>", output);
+        Assert.Empty(report.Actions);
+    }
+
     // ============= Robustesse / edge cases =============
 
     [Fact]

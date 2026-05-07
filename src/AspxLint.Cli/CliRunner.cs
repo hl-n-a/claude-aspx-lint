@@ -41,6 +41,7 @@ public static class CliRunner
                 "analyze"     => await AnalyzeAsync(args[1..], stdout, stderr),
                 "rules"       => RulesAsync(args[1..], stdout, stderr),
                 "migrate"     => await MigrateAsync(args[1..], stdout, stderr),
+                "migrate-verify" => MigrateVerifyAsync(args[1..], stdout, stderr),
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
                 "watch"       => await WatchAsync(args[1..], stdout, stderr),
                 "init"        => await InitAsync(args[1..], stdout, stderr),
@@ -298,6 +299,7 @@ public static class CliRunner
         o.WriteLine("  aspx-lint rules [--lang fr|en]                           [JSON metadata des regles]");
         o.WriteLine("  aspx-lint migrate <path> [--out <dir>] [--dry-run] [--report <file.md>]");
         o.WriteLine("                                                           [.aspx -> .cshtml + rapport]");
+        o.WriteLine("  aspx-lint migrate-verify <dir> [--report <file.md>]      [audit residus ASPX dans .cshtml]");
         o.WriteLine("  aspx-lint scan <path> [--json | --sarif | --junit | --codeclimate | --tap]");
         o.WriteLine("                       [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
@@ -1168,5 +1170,98 @@ public static class CliRunner
         }
 
         return ExitOk;
+    }
+
+    /// <summary>
+    /// migrate-verify <dir> [--report <file.md>]
+    ///
+    /// Scanne tous les .cshtml d'un dossier (recursif) pour detecter des
+    /// residus ASPX. Sortie : un rapport sur stdout (ou dans un fichier
+    /// si `--report`) avec :
+    ///   - Les bugs des transformers actuels (a fixer)
+    ///   - Les controles serveur en attente de Phase 3
+    ///   - Le data-binding en attente de Phase 4
+    ///   - Les items manuels
+    ///
+    /// Exit code 0 si rien a signaler, 1 sinon.
+    /// </summary>
+    private static int MigrateVerifyAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        if (args.Length == 0)
+        {
+            stderr.WriteLine("Usage: aspx-lint migrate-verify <dir> [--report <file.md>]");
+            return ExitIssuesFound;
+        }
+
+        var path = args[0];
+        string? reportPath = null;
+
+        for (int i = 1; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--report" when i + 1 < args.Length:
+                    reportPath = args[++i];
+                    break;
+                default:
+                    stderr.WriteLine($"Argument inconnu : {args[i]}");
+                    return ExitIssuesFound;
+            }
+        }
+
+        if (!Directory.Exists(path))
+        {
+            stderr.WriteLine($"Dossier introuvable : {path}");
+            return ExitError;
+        }
+
+        var issues = global::AspxLint.Migrate.MigrationVerifier.VerifyDirectory(path);
+
+        var bug     = issues.Count(i => i.Severity == global::AspxLint.Migrate.VerifySeverity.Bug);
+        var pending = issues.Count(i => i.Severity == global::AspxLint.Migrate.VerifySeverity.Pending);
+        var manual  = issues.Count(i => i.Severity == global::AspxLint.Migrate.VerifySeverity.Manual);
+
+        // Top 5 patterns sur stdout (resume rapide).
+        var top = issues.GroupBy(i => i.Pattern)
+                        .Select(g => (Pattern: g.Key, Count: g.Count()))
+                        .OrderByDescending(x => x.Count)
+                        .Take(5)
+                        .ToList();
+
+        stdout.WriteLine($"migrate-verify {path}");
+        stdout.WriteLine();
+        stdout.WriteLine($"  bugs:    {bug}    (transformers actuels rates)");
+        stdout.WriteLine($"  pending: {pending}    (Phase 3-4 a venir)");
+        stdout.WriteLine($"  manual:  {manual}    (a traiter a la main)");
+        stdout.WriteLine($"  total:   {issues.Count}");
+        if (top.Count > 0)
+        {
+            stdout.WriteLine();
+            stdout.WriteLine("Top patterns :");
+            foreach (var (pattern, count) in top)
+                stdout.WriteLine($"  {count,6}  {pattern}");
+        }
+
+        if (reportPath != null)
+        {
+            try
+            {
+                File.WriteAllText(reportPath, global::AspxLint.Migrate.MigrationVerifier.Markdown(issues));
+                stdout.WriteLine();
+                stdout.WriteLine($"Rapport ecrit : {reportPath}");
+            }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"Ecriture du rapport echouee : {ex.Message}");
+                return ExitError;
+            }
+        }
+        else if (issues.Count > 0)
+        {
+            stdout.WriteLine();
+            stdout.WriteLine("Tip : passe `--report verify-report.md` pour avoir le detail.");
+        }
+
+        return issues.Count > 0 ? ExitIssuesFound : ExitOk;
     }
 }

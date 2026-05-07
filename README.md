@@ -302,7 +302,20 @@ Dans les deux cas :
 ```bash
 aspx-lint migrate path/to/Index.aspx --out path/to/output --report report.md
 aspx-lint migrate path/to/Views --out path/to/Pages --dry-run
+
+# Apres la migration, audit ce qui reste (residus ASPX dans les .cshtml).
+aspx-lint migrate-verify path/to/output --report verify.md
 ```
+
+Le **verifier** scanne tous les `.cshtml` du dossier de sortie et signale :
+- 🔴 **Bug** : un transformer du pipeline aurait dû gérer ce pattern mais
+  l'a raté (régression à corriger)
+- ⏳ **Pending** : pattern qui sera traité par une phase à venir
+  (contrôles serveur en Phase 3, data-binding en Phase 4)
+- ✋ **Manual** : pattern qui restera à traiter à la main
+
+Validé sur un projet réel (352 fichiers `.aspx` / `.ascx` migrés) : sortie
+**0 résidu ASPX** détecté par le verifier.
 
 ### Phase 1 : transformations syntaxiques
 

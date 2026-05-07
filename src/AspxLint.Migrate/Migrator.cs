@@ -53,6 +53,10 @@ public static class Migrator
         new ChildPageContentTransformer(),
         new ServerExpressionTransformer(),
         new ServerStatementTransformer(),
+        // En dernier : on a deja transforme les <asp:Content> et
+        // <asp:ContentPlaceHolder>, donc le strip runat="server" ne
+        // touche que les tags HTML (form, head, body, div, ...).
+        new RunatServerTransformer(),
     };
 
     /// <summary>
