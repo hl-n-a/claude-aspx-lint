@@ -531,6 +531,41 @@ public class TransformerTests
     }
 
     [Fact]
+    public void ServerStatement_stacked_closings_split_correctly()
+    {
+        // Pattern legacy : <% } } } %> ferme 3 blocks empiles.
+        // Doit produire 3 `}` separes, pas un seul wrapper @{ }.
+        var t = new ServerStatementTransformer();
+        var input = "<% } } } %>";
+        var (output, _) = Run(t, input);
+        Assert.DoesNotContain("@{", output);
+        Assert.Equal(3, output.Count(c => c == '}'));
+    }
+
+    [Fact]
+    public void ServerStatement_closing_then_new_code_splits()
+    {
+        // Pattern : <% } if (cond) { ... } %> ferme un block puis ouvre/ferme
+        // un autre. Le closing initial doit sortir du wrapper @{ }.
+        var t = new ServerStatementTransformer();
+        var input = "<% } if (cond) { Foo(); } %>";
+        var (output, _) = Run(t, input);
+        Assert.StartsWith("}", output);          // closing emis en premier
+        Assert.Contains("@if (cond) {", output); // puis le if traite normalement
+        Assert.DoesNotContain("@{ }", output);
+    }
+
+    [Fact]
+    public void ServerStatement_else_block_alone_preserved()
+    {
+        // <% } else { %> doit produire `} else {` et PAS `} else` puis `@{ {`.
+        var t = new ServerStatementTransformer();
+        var input = "<% } else { %>";
+        var (output, _) = Run(t, input);
+        Assert.Equal("} else {", output);
+    }
+
+    [Fact]
     public void ServerStatement_braces_inside_strings_dont_count()
     {
         // Le `}` dans une string ne doit pas compter dans le balance check.

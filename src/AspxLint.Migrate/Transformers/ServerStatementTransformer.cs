@@ -54,13 +54,21 @@ public sealed class ServerStatementTransformer : ITransformer
         int closingCount = 0;
         int emptyCount = 0;
 
+        // Pattern : stmt commence par `}` (closing prev block) suivi d'autre
+        // code. Si on wrappait tout dans `@{ ... }`, le `}` initial fermerait
+        // immediatement le block Razor et le code qui suit serait du HTML
+        // litteral non-execute. Solution : split — emet `}` (eventuellement
+        // `} else { ` etc.) puis traite le reste comme un nouveau stmt.
+        var leadingCloser = new Regex(
+            @"^(\}\s*(?:else(?:\s+if\s*\([^)]*\))?\s*\{?)?)\s*([\s\S]+)$",
+            RegexOptions.Compiled);
+
         var result = ServerStmt.Replace(content, m =>
         {
             var raw = m.Groups[1].Value;
             var stmt = raw.Trim();
             int line = ServerCommentTransformer.LineOf(content, m.Index);
 
-            // 0. `<% %>` vide -> on retire purement (sinon @{ } visuel inutile).
             if (stmt.Length == 0)
             {
                 emptyCount++;
@@ -73,56 +81,43 @@ public sealed class ServerStatementTransformer : ITransformer
                     "Bloc serveur contient `Response.Write(...)` qui est generalement remplacable par une expression `@(...)` directe en Razor.");
             }
 
-            // 1. `<% } %>` ou `<% } else { %>` → juste les accolades, sans @{}.
+            // 1. `<% } %>` ou `<% } else { %>` standalone (rien apres) :
+            //    on les detecte AVANT le split pour ne pas casser ces patterns.
             if (ClosingOnly.IsMatch(stmt))
             {
                 closingCount++;
                 return stmt;
             }
-
-            // 2. `<% else ... %>` ou `<% else if (...) { %>` → idem.
             if (ElseOpening.IsMatch(stmt))
             {
                 closingCount++;
                 return stmt;
             }
 
-            // 3a. `<% if (cond) { ... %>` (ouvre un bloc qui ne ferme pas
-            //     dans ce stmt — le `}` arrivera plus tard dans un autre
-            //     `<% } %>`). Detection via comptage de braces : si depth
-            //     finale > 0, le stmt est un opener.
-            //     Output : `@stmt` brut. Razor parse `@if (cond) { ...`
-            //     comme un block dont le HTML qui suit fait partie du body.
-            if (BlockKeyword.IsMatch(stmt) && IsBlockOpener(stmt))
+            // Cas split : stmt commence par un ou plusieurs `}` (closings de
+            // blocks precedents) suivis de code. On emet chaque closing
+            // separement puis on traite le reste. Loop pour gerer les cas
+            // `<% } } } %>` (3 niveaux empiles).
+            var closings = new List<string>();
+            while (true)
             {
-                controlCount++;
-                return "@" + stmt;
+                var lead = leadingCloser.Match(stmt);
+                if (!lead.Success) break;
+                closings.Add(lead.Groups[1].Value.TrimEnd());
+                stmt = lead.Groups[2].Value.Trim();
+                closingCount++;
             }
 
-            // 3b. `<% if (cond) { body; } %>` ou variante multi-line ou le
-            //     `<% %>` contient EXACTEMENT UNE structure de controle
-            //     complete (pas plusieurs statements). Conversion direct
-            //     en `@if/@foreach/etc.` sans wrapper `@{}`.
-            if (IsSingleControlFlowStatement(stmt))
-            {
-                controlCount++;
-                return "@" + stmt;
-            }
+            var restRendered = RenderStmt(stmt, ctx, line,
+                ref statementCount, ref controlCount);
 
-            // 3c. `<% if (cond) body; %>` (sans accolades) → `@if (cond) { body; }`
-            //     C# permet l'inline if sans accolades, Razor aussi mais c'est
-            //     plus sur de wrapper le body. Heuristique : on force des
-            //     accolades autour du body.
-            if (TryWrapInlineControl(stmt, out var wrapped))
-            {
-                controlCount++;
-                return wrapped;
-            }
+            if (closings.Count == 0)
+                return restRendered;
 
-            // 4. Tout le reste (declarations, assignations, methods calls
-            //    autonomes) → bloc `@{ }` classique.
-            statementCount++;
-            return $"@{{ {stmt} }}";
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in closings) { sb.AppendLine(c); }
+            sb.Append(restRendered);
+            return sb.ToString();
         });
 
         if (statementCount + controlCount + closingCount + emptyCount > 0)
@@ -135,6 +130,48 @@ public sealed class ServerStatementTransformer : ITransformer
             ctx.Log(MigrationSeverity.Auto, null, Name, string.Join(" ; ", parts) + ".");
         }
         return result;
+    }
+
+    /// <summary>
+    /// Applique les branches de transformation a un stmt deja "nettoye"
+    /// (sans le `}` de fermeture d'un block precedent en debut). Les compteurs
+    /// sont modifies en place. Renvoie le rendu Razor.
+    /// </summary>
+    private string RenderStmt(string stmt, MigrationContext ctx, int line,
+        ref int statementCount, ref int controlCount)
+    {
+        if (stmt.Length == 0) return "";
+
+        // 1. `<% } %>` ou `<% } else { %>` standalone.
+        if (ClosingOnly.IsMatch(stmt)) return stmt;
+
+        // 2. `<% else ... %>`.
+        if (ElseOpening.IsMatch(stmt)) return stmt;
+
+        // 3a. Block opener (depth > 0).
+        if (BlockKeyword.IsMatch(stmt) && IsBlockOpener(stmt))
+        {
+            controlCount++;
+            return "@" + stmt;
+        }
+
+        // 3b. Single complete control flow.
+        if (IsSingleControlFlowStatement(stmt))
+        {
+            controlCount++;
+            return "@" + stmt;
+        }
+
+        // 3c. Inline if sans accolades.
+        if (TryWrapInlineControl(stmt, out var wrapped))
+        {
+            controlCount++;
+            return wrapped;
+        }
+
+        // 4. Default : @{ stmt }
+        statementCount++;
+        return $"@{{ {stmt} }}";
     }
 
     /// <summary>
