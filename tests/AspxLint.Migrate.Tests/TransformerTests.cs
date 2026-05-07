@@ -476,11 +476,69 @@ public class TransformerTests
     // ============= Robustesse / edge cases =============
 
     [Fact]
-    public void ServerStatement_empty_block_does_not_crash()
+    public void ServerStatement_empty_block_is_removed()
     {
+        // `<% %>` vide : on retire purement (sinon @{} visuel inutile).
         var t = new ServerStatementTransformer();
         var (output, _) = Run(t, "<% %>");
-        Assert.Equal("@{  }", output);
+        Assert.Equal("", output);
+    }
+
+    [Fact]
+    public void ServerStatement_single_line_balanced_if_unwraps()
+    {
+        var t = new ServerStatementTransformer();
+        var (output, _) = Run(t, "<% if (Model == null) { return; } %>");
+        Assert.Equal("@if (Model == null) { return; }", output);
+    }
+
+    [Fact]
+    public void ServerStatement_multiple_statements_stays_in_curly_block()
+    {
+        // <% if (cond) { ... } stmt2; if (cond2) { ... } %> contient
+        // PLUSIEURS statements -> doit rester dans @{ } pour rester du
+        // Razor valide (Razor ne tolere qu'UNE structure derriere `@`).
+        var t = new ServerStatementTransformer();
+        var input = "<% if (Model == null) { return; } bool x = false; if (X) { Y(); } %>";
+        var (output, _) = Run(t, input);
+        Assert.StartsWith("@{ ", output);
+        Assert.EndsWith(" }", output);
+    }
+
+    [Fact]
+    public void ServerStatement_multi_line_single_block_unwraps()
+    {
+        var t = new ServerStatementTransformer();
+        var input = "<% if (cond)\n{\n    DoSomething();\n    DoSomethingElse();\n} %>";
+        var (output, _) = Run(t, input);
+        Assert.StartsWith("@if", output);
+        Assert.DoesNotContain("@{", output);
+    }
+
+    [Fact]
+    public void ServerStatement_block_opener_with_unbalanced_braces_unwraps()
+    {
+        // Cas reel : le `<% %>` ouvre un if avec `{` mais ne ferme pas dans
+        // ce stmt — le `}` arrive dans un `<% } %>` plus loin. La depth
+        // finale est > 0, donc IsBlockOpener detecte. On emet `@stmt` brut.
+        // Razor parse ca comme un block dont le HTML qui suit fait partie
+        // du body.
+        var t = new ServerStatementTransformer();
+        var input = "<% if (cond)\n{\n    var x = 1;\n    var y = 2;\n %>";
+        var (output, _) = Run(t, input);
+        Assert.StartsWith("@if", output);
+        Assert.DoesNotContain("@{", output);
+    }
+
+    [Fact]
+    public void ServerStatement_braces_inside_strings_dont_count()
+    {
+        // Le `}` dans une string ne doit pas compter dans le balance check.
+        var t = new ServerStatementTransformer();
+        var input = "<% var s = \"with } brace\"; if (cond) { Foo(); } %>";
+        var (output, _) = Run(t, input);
+        // Multiple statements (var + if) -> @{ }
+        Assert.StartsWith("@{", output);
     }
 
     [Fact]
