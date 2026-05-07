@@ -151,12 +151,36 @@ public class TransformerTests
     }
 
     [Fact]
-    public void PageDirective_master_flagged_manual()
+    public void PageDirective_master_directive_removed()
     {
+        // Phase 2 : la directive @Master est supprimee (un layout Razor n'a
+        // pas de directive d'entete equivalente). Le contenu (HTML +
+        // ContentPlaceHolder) est traite par d'autres transformers.
         var t = new PageDirectiveTransformer();
         var (output, report) = Run(t, "<%@ Master Language=\"C#\" %>");
-        Assert.Contains("TODO[aspx-migrate]", output);
-        Assert.Equal(1, report.CountBySeverity(MigrationSeverity.Manual));
+        Assert.Equal("", output);
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Manual));
+        Assert.True(report.CountBySeverity(MigrationSeverity.Auto) >= 1);
+    }
+
+    [Fact]
+    public void PageDirective_with_master_page_file_emits_layout_binding()
+    {
+        var t = new PageDirectiveTransformer();
+        var (output, _) = Run(t,
+            "<%@ Page Language=\"C#\" Inherits=\"App.Home\" MasterPageFile=\"~/Site.Master\" %>");
+        Assert.Contains("@page", output);
+        Assert.Contains("@model App.Home", output);
+        Assert.Contains("Layout = \"_Site\"", output);
+    }
+
+    [Fact]
+    public void PageDirective_master_path_with_subdir_resolves_basename()
+    {
+        var t = new PageDirectiveTransformer();
+        var (output, _) = Run(t,
+            "<%@ Page MasterPageFile=\"~/MasterPages/Public.Master\" %>");
+        Assert.Contains("Layout = \"_Public\"", output);
     }
 
     [Fact]

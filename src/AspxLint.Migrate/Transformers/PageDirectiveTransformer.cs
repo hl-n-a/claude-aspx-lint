@@ -78,14 +78,14 @@ public sealed class PageDirectiveTransformer : ITransformer
         if (attrs.TryGetValue("Inherits", out var model))
             lines.Add($"@model {model}");
 
-        // MasterPageFile : "Razor Page" peut declarer Layout = "..." dans
-        // un bloc @{ }. On le signale mais on ne le branche pas
-        // automatiquement (Phase 2 fera la migration master proprement).
+        // MasterPageFile : Phase 2 — on cable proprement le Layout en
+        // suivant la convention de naming `Site.Master` → `_Site.cshtml`.
         if (attrs.TryGetValue("MasterPageFile", out var master))
         {
-            ctx.Log(MigrationSeverity.Manual, line, Name,
-                $"@Page MasterPageFile=\"{master}\" → en Razor utiliser `@{{ Layout = \"_Layout\"; }}` (Phase 2 du migrate gerera ca proprement).");
-            lines.Add($"@*TODO[aspx-migrate] master page: {master} *@");
+            var layoutName = MasterPageHelpers.MasterPathToLayoutName(master);
+            lines.Add($"@{{ Layout = \"{layoutName}\"; }}");
+            ctx.Log(MigrationSeverity.Auto, line, Name,
+                $"@Page MasterPageFile=\"{master}\" → `Layout = \"{layoutName}\"`.");
         }
 
         // Title : pour info, on ne porte pas (Razor a ses propres conventions
@@ -112,9 +112,14 @@ public sealed class PageDirectiveTransformer : ITransformer
 
     private string HandleMaster(Dictionary<string, string> attrs, MigrationContext ctx, int line, string original)
     {
-        ctx.Log(MigrationSeverity.Manual, line, Name,
-            "Directive @Master → migration vers Razor Layout (`_Layout.cshtml`) deferree a la Phase 2 du migrate. Le contenu du master n'est pas traduit automatiquement en Phase 1.");
-        return $"@*TODO[aspx-migrate] master page: {original} *@";
+        // Phase 2 : un master devient un layout. Razor n'a pas de directive
+        // d'entete pour les layouts ; ils ont juste leur HTML +
+        // @RenderBody / @RenderSection. On retire donc la directive et
+        // on signale que le contenu est en cours de transformation par
+        // MasterContentPlaceHolderTransformer.
+        ctx.Log(MigrationSeverity.Auto, line, Name,
+            "Directive @Master retiree — le fichier devient un Razor layout (`_Site.cshtml`). Les `<asp:ContentPlaceHolder>` seront transformes en `@RenderBody()` / `@RenderSection(...)`.");
+        return "";
     }
 
     private string HandleRegister(Dictionary<string, string> attrs, MigrationContext ctx, int line, string original)

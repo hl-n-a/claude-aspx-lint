@@ -73,14 +73,16 @@ public class MigratorTests
     }
 
     [Fact]
-    public void Migrate_master_flags_for_phase2()
+    public void Migrate_master_emits_layout_with_render_body()
     {
+        // Phase 2 : le master devient un Razor layout. La directive
+        // <%@ Master %> disparait, les ContentPlaceHolder deviennent
+        // @RenderBody() (primary) ou @RenderSection(...).
         var input = "<%@ Master Language=\"C#\" %>\n<asp:ContentPlaceHolder ID=\"Body\" runat=\"server\" />";
         var result = Migrator.Migrate(input, "Site.master");
-        // En Phase 1 on ne traite pas les ContentPlaceHolder ; on insere
-        // un TODO sur la directive @Master.
-        Assert.Contains("TODO[aspx-migrate]", result.Content);
-        Assert.True(result.Actions.Any(a => a.Severity == MigrationSeverity.Manual));
+        Assert.DoesNotContain("<%@ Master", result.Content);
+        Assert.DoesNotContain("<asp:ContentPlaceHolder", result.Content);
+        Assert.Contains("@RenderBody()", result.Content);
     }
 
     [Fact]

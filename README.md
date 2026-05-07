@@ -292,19 +292,19 @@ Dans les deux cas :
 
 ---
 
-## Migration ASPX → Razor (Phase 1)
+## Migration ASPX → Razor (Phases 1 + 2)
 
-> Phase 1 = transformations syntaxiques uniquement. Les contrôles serveur
+> **Phases 1 + 2** : syntaxe + master pages. Les contrôles serveur
 > (`<asp:Label>`, `<asp:GridView>`, ...) et le code-behind (`Page_Load`,
 > ViewState, postbacks) sont laissés tels quels avec des marqueurs
-> `@*TODO[aspx-migrate] *@` à reprendre à la main. Phases 2-5 à venir.
+> `@*TODO[aspx-migrate] *@`. Phases 3-5 à venir.
 
 ```bash
 aspx-lint migrate path/to/Index.aspx --out path/to/output --report report.md
 aspx-lint migrate path/to/Views --out path/to/Pages --dry-run
 ```
 
-### Ce qui est transformé automatiquement (Phase 1)
+### Phase 1 : transformations syntaxiques
 
 | ASPX | Razor |
 |---|---|
@@ -319,9 +319,30 @@ aspx-lint migrate path/to/Views --out path/to/Pages --dry-run
 | `<% foreach (...) { %>` ... `<% } %>` | `@foreach (...) {` ... `}` |
 | `<% var x = 1; %>` | `@{ var x = 1; }` |
 
-### Ce qui est flaggé pour reprise manuelle
+### Phase 2 : master pages → Razor layouts
 
-- `<%@ Master %>` → migration vers `_Layout.cshtml` (Phase 2)
+| ASPX | Razor |
+|---|---|
+| `<%@ Master %>` | (directive supprimée — un layout n'a pas de directive d'entête) |
+| `<asp:ContentPlaceHolder ID="MainContent" />` (primary) | `@RenderBody()` |
+| `<asp:ContentPlaceHolder ID="X" />` (autres) | `@RenderSection("X", required: false)` |
+| `<asp:ContentPlaceHolder ID="X">default</asp:ContentPlaceHolder>` | `@RenderSection("X", required: false)` + TODO avec le default |
+| `<%@ Page MasterPageFile="~/Site.Master" %>` | `@page` + `@{ Layout = "_Site"; }` |
+| `<asp:Content ContentPlaceHolderID="MainContent">...</asp:Content>` (primary) | contenu inline (sans wrapper) |
+| `<asp:Content ContentPlaceHolderID="X">...</asp:Content>` (autres) | `@section X { ... }` |
+
+Le **primary** est choisi par préférence : `MainContent`, `Body`, `Content`,
+`MainBody`, `MainPlaceHolder`, `Main` (case-insensitive). Si aucun de ces
+noms n'est trouvé, le premier ContentPlaceHolder/Content par ordre du
+document devient le primary.
+
+**Convention de naming** : `Site.Master` → `_Site.cshtml` (préfixe `_`
+qui est la convention Razor pour les partials et layouts). Le `Layout`
+de la page enfant pointe sur `_Site` (chemin relatif, Razor le résout
+via les conventions habituelles : `Views/Shared/_Site.cshtml`).
+
+### Ce qui est encore flaggé manuel
+
 - `<%@ Register %>` → `@addTagHelper` ou `<partial name="...">` selon contexte
 - `<%@ OutputCache %>` → `[ResponseCache]` ou `<cache>` tag helper
 - `<%# Eval("X") %>` → l'expression est conservée mais le contexte de
@@ -329,8 +350,10 @@ aspx-lint migrate path/to/Views --out path/to/Pages --dry-run
   variable de boucle expose bien la propriété
 - `Response.Write(...)` dans un bloc `<% %>` → généralement remplaçable
   par `@(...)` direct
-- Tout `<asp:...>` (contrôles serveur) → laissé en place, à convertir
-  manuellement (Phase 3)
+- Default content d'un `<asp:ContentPlaceHolder>` → conservé en commentaire
+  TODO ; pour le restaurer en Razor il faut `@if (!IsSectionDefined("X")) { ... }`
+- Tout `<asp:...>` non-Content/ContentPlaceHolder (contrôles serveur)
+  → laissé en place, à convertir manuellement (Phase 3)
 
 ### Le rapport markdown
 

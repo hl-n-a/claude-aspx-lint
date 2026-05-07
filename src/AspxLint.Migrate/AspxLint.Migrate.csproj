@@ -17,4 +17,8 @@
     <PackageTags>asp.net;web-forms;aspx;razor;migration</PackageTags>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AspxLint.Migrate.Tests" />
+  </ItemGroup>
+
 </Project>

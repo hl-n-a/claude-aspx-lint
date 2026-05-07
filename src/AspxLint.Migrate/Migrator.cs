@@ -15,30 +15,42 @@ public sealed record MigrationResult(
 /// <summary>
 /// Orchestrateur du pipeline de migration ASPX → Razor.
 ///
-/// Phase 1 (cette implementation) : transformations purement syntaxiques.
-///   1. Server comments    `<%-- --%>`     → `@* *@`
-///   2. Page directives    `<%@ Page %>`   → `@page` / `@model` / `@using`
-///   3. Server expressions `<%= %>`,`<%: %>`,`<%# %>` → `@(...)`
-///   4. Server statements  `<% %>`         → `@{ }`
+/// Phase 1 : transformations purement syntaxiques.
+///   - Server comments    `<%-- --%>`     → `@* *@`
+///   - Page directives    `<%@ Page %>`   → `@page` / `@model` / `@using`
+///   - Server expressions `<%= %>`,`<%: %>`,`<%# %>` → `@(...)`
+///   - Server statements  `<% %>`         → `@{ }` ou `@if/@foreach`
 ///
-/// Phase 2 (a venir) : master pages → layouts.
-/// Phase 3 : controles serveur courants → HTML5.
+/// Phase 2 (cette extension) : master pages → layouts.
+///   - `<%@ Master %>` retire (le fichier devient un layout)
+///   - `<asp:ContentPlaceHolder ID="X">` → `@RenderBody()` (primary)
+///                                       ou `@RenderSection("X", required: false)`
+///   - `<%@ Page MasterPageFile="..." %>` → ajoute `Layout = "_Site"`
+///   - `<asp:Content ContentPlaceHolderID="X">` → contenu inline (primary)
+///                                              ou `@section X { ... }`
+///
+/// Phase 3 (a venir) : controles serveur courants → HTML5.
 /// Phase 4 : data binding (`Eval(...)`) → `@Model.X`.
 /// Phase 5 : code-behind (Roslyn).
 /// </summary>
 public static class Migrator
 {
     /// <summary>Pipeline ordonne. L'ordre compte :
-    ///   - Comments en premier (sinon les expressions matchent dedans)
-    ///   - Directives ensuite (on ne veut pas que `&lt;%@ Page %&gt;` matche le
-    ///     pattern d'expression non-greedy)
-    ///   - Expressions avant statements (les expressions ont des prefixes
-    ///     specifiques `=`, `:`, `#` que les statements excluent).
+    ///   1. Comments — sinon les expressions / directives matchent dedans
+    ///   2. Page directives — emit @page / @model / Layout = "..."
+    ///   3. Master ContentPlaceHolder → @RenderBody / @RenderSection
+    ///      (uniquement sur les .master)
+    ///   4. Child page Content → inline ou @section
+    ///      (sur les .aspx qui ont `<asp:Content>`)
+    ///   5. Server expressions (= / : / #) avant les statements
+    ///   6. Server statements (qui excluent les prefixes d'expression)
     /// </summary>
     public static IReadOnlyList<ITransformer> DefaultPipeline { get; } = new ITransformer[]
     {
         new ServerCommentTransformer(),
         new PageDirectiveTransformer(),
+        new MasterContentPlaceHolderTransformer(),
+        new ChildPageContentTransformer(),
         new ServerExpressionTransformer(),
         new ServerStatementTransformer(),
     };
