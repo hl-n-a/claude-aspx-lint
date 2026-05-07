@@ -10,6 +10,152 @@ Versions are derived automatically from git tags via [MinVer](https://github.com
 
 _(empty — start of next cycle)_
 
+## [0.4.0] - 2026-05-07
+
+Big release. Surface étendue : nouvelles règles Web.config, intégration
+VS Code complète, package MSBuild pour `dotnet build`, branding fini.
+**No breaking changes** — tout est additif.
+
+### Added
+
+#### 6 nouvelles règles CFG-XXX (Web.config)
+
+`ProjectScanner.DefaultExtensions` étendu à `.config`. Les règles `CFG-XXX`
+gardent `ctx.Ext == "config"` pour ne fire que sur les `.config`.
+
+- **CFG-001** (warning, auto-fix) — `<compilation debug="true">` en
+  Web.config : perf + sécurité.
+- **CFG-002** (warning, auto-fix) — `<customErrors mode="Off">` :
+  leak de stack traces.
+- **CFG-003** (info, auto-fix) — `<trace enabled="true">` : Trace.axd
+  expose des données de session.
+- **CFG-004** (warning, manuel) — `<httpCookies>` sans
+  `httpOnlyCookies` / `requireSSL`.
+- **CFG-005** (info, manuel) — `<sessionState mode="InProc">` ne scale pas.
+- **CFG-006** (warning, manuel) — `password=...` en clair dans
+  `connectionString`.
+
+Recap : **35 règles** (était 29), **22 auto-fixables** (était 19),
+**13 manuelles**.
+
+#### Extension VS Code (`hl-n-a.aspx-lint`)
+
+Nouvelle extension publiable sur le marketplace VS Code :
+
+- **Diagnostics inline** sur ouverture / save / frappe (debounced 500ms,
+  opt-in). Squigglies coloriés par sévérité.
+- **Hover** : survol d'une diagnostic affiche la description complète
+  de la règle, sa sévérité, et son statut auto-fixable.
+- **Code actions** (Ctrl+. / Cmd+.) : pour chaque issue, propose
+  *« appliquer le fix de RULE-ID »*. Le fix est appliqué **uniquement
+  sur le buffer courant**, pas sur les autres fichiers. Undoable en Ctrl+Z.
+- **Format Document** (Shift+Alt+F) : `DocumentFormattingEditProvider`
+  qui applique tous les auto-fixes via `aspx-lint fix --stdin`.
+  Compatible avec `editor.formatOnSave`.
+- **21 snippets** ASPX (`@page`, `@control`, `@master`, `@register`,
+  `<%=`, `<%#`, `<%--`, `asplabel`, `asptextbox`, `aspbutton`, `aspddl`,
+  `aspgrid`, `asprepeater`, `aspplaceholder`, `aspcontent`, `aspform`,
+  `aspscriptmgr`, `aspupdatepanel`, `aspxdisable`, …).
+- **3 commandes** dans la palette : `aspx-lint: Scan workspace`,
+  `aspx-lint: Fix current file`, `aspx-lint: Show output`.
+- **4 settings** : `aspxLint.path`, `lintOnSave`, `lintOnType`,
+  `severityLevel`.
+- Workflow CI `vscode.yml` qui build et package `.vsix` à chaque push,
+  publie sur le marketplace VS Code à chaque release GitHub si
+  `VSCE_PAT` est configuré.
+
+#### Package MSBuild (`aspx-lint.MSBuild`)
+
+Nouveau package NuGet — **10 KB**, props/targets only — qui hook dans
+le pipeline de build .NET :
+
+```xml
+<PackageReference Include="aspx-lint.MSBuild" Version="0.4.0">
+  <PrivateAssets>all</PrivateAssets>
+</PackageReference>
+```
+
+`dotnet build` lance alors `aspx-lint scan` après la compilation. Si
+une issue ≥ severity (default `error`) est trouvée, la build échoue.
+Configurable via `<PropertyGroup>` (`AspxLintEnabled`,
+`AspxLintFailOnSeverity`, `AspxLintScanPath`, `AspxLintExecutable`,
+`AspxLintQuiet`). Pré-requis : CLI `aspx-lint` installé globalement.
+
+Publié automatiquement à côté du CLI sur NuGet à chaque tag.
+
+#### 3 nouvelles commandes CLI (pour intégrations IDE)
+
+- **`aspx-lint analyze`** — analyse un fichier unique sans toucher au
+  disque. Lit depuis stdin (`--stdin`) ou depuis un path. Sort du JSON
+  `{ ext, issues:[...] }`. Conçu pour les bindings IDE.
+- **`aspx-lint fix --stdin`** — applique le fix sur le contenu reçu sur
+  stdin, écrit le résultat sur stdout. Avec `--rule X` : un seul fix.
+  Sans : tous les auto-fixes (5 passes de convergence).
+- **`aspx-lint rules`** — dump JSON des métadonnées de toutes les règles
+  (id, name, description, severity, hasFix). `--lang fr|en` pour traduire.
+
+`AnalyzeAsync` et `FixStdinAsync` lisent maintenant via `Console.In`
+plutôt que `Console.OpenStandardInput()` — respecte les pipes shell ET
+permet aux unit tests d'intercepter via `Console.SetIn`.
+
+#### Branding complet
+
+- **Icône `<%`** chartreuse sur fond charcoal-navy (sources dans
+  `assets/source/`, déclinaisons régénérables via
+  `assets/build-icons.ps1`, .NET System.Drawing, zéro dépendance).
+- **Bannière** `aspx · lint` éditoriale en serif italique pour le
+  marketplace VS Code et les partages OG/Twitter.
+- Câblage automatique :
+  - `src/AspxLint.VSCode/icon.png` (128×128) + `galleryBanner` color
+    `#0f1419` dans package.json
+  - `src/AspxLint.Desktop/icon.ico` multi-résolution (16/32/48/64/128/256)
+    → tray + window title bar + Win32 ApplicationIcon
+  - `src/AspxLint.Web/favicon.ico` embarqué + route `GET /favicon.ico`
+    sans auth + `<link rel="icon">` dans le `<head>` de la dashboard
+  - `docs/favicon.ico`, `apple-touch-icon.png`, `og-image.png` + meta
+    OpenGraph/Twitter pour les partages, `brand-icon` dans le header
+    du stats site.
+- Tests : `Dashboard_links_to_favicon` + `Favicon_is_served_without_auth`.
+
+### Changed
+
+- **Default extensions du scanner** : `.config` ajouté à
+  `ProjectScanner.DefaultExtensions`. Les fichiers Web.config sont
+  maintenant lintés automatiquement par `aspx-lint scan` sans config
+  spéciale.
+- **`Console.In` au lieu de `Console.OpenStandardInput()`** dans
+  `AnalyzeAsync` et `FixStdinAsync` du CLI : meilleure portabilité
+  shell + testabilité.
+- **Tray icon Desktop** : charge la ressource embarquée `icon.ico`
+  multi-résolution au lieu de générer une icône 16×16 à la volée
+  avec une lettre "A" peinte en jaune-vert.
+
+### Migration notes
+
+- **Nouvelles règles CFG-XXX** : si tu scannes un dossier qui contient
+  des `Web.config`, tu vas voir de nouvelles issues apparaître. Pour
+  garder l'ancien comportement (pas de lint des `.config`), passe
+  `aspx-lint scan <dir> --severity error` ou désactive les règles via
+  `.aspxlintrc.json` :
+
+  ```json
+  {
+    "rules": {
+      "CFG-001": "off",
+      "CFG-002": "off",
+      "CFG-003": "off",
+      "CFG-004": "off",
+      "CFG-005": "off",
+      "CFG-006": "off"
+    }
+  }
+  ```
+
+- **Aucune autre action requise** pour les utilisateurs existants. La
+  signature publique du CLI, le format SARIF / JSON, l'API HTTP du
+  serveur, l'app Desktop sont tous inchangés. Les nouvelles commandes
+  CLI (`analyze`, `rules`) et le mode `--stdin` de `fix` sont additifs.
+
 ## [0.3.0] - 2026-05-06
 
 A large feature push covering rules, dashboard UX, CLI ergonomics, server
@@ -346,7 +492,8 @@ Reconnu aussi en commentaires HTML (`<!-- ... -->`).
   with `.nupkg` + Desktop self-contained `.exe`, pushes to NuGet.org.
 - Auto-versioning via MinVer : version derived from git tags.
 
-[Unreleased]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hl-n-a/claude-aspx-lint/compare/v0.1.0...v0.2.0
