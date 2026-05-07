@@ -42,6 +42,36 @@ public sealed class PageDirectiveTransformer : ITransformer
     private static readonly Regex Attribute =
         new(@"(\w+)\s*=\s*[""']([^""']*)[""']", RegexOptions.Compiled);
 
+    // Pattern MVC pour les Inherits avec generique : System.Web.Mvc.ViewPage<X>,
+    // ViewUserControl<X>, ViewMasterPage<X> (avec ou sans namespace).
+    // En Razor on declare juste `@model X` — la classe de base est
+    // implicite. Le greedy `<(.+)>` capture le bon contenu meme si X
+    // est lui-meme generique (List<T>, etc.).
+    private static readonly Regex MvcInheritsGeneric = new(
+        @"^(?:System\.Web\.Mvc\.)?(?:ViewPage|ViewUserControl|ViewMasterPage)\s*<(.+)>\s*$",
+        RegexOptions.Compiled);
+
+    // Pattern MVC sans generique : Inherits="System.Web.Mvc.ViewPage" /
+    // ViewUserControl / ViewMasterPage. La page utilise `Model` en dynamic ;
+    // en Razor on ne declare pas de @model du tout (le defaut est dynamic).
+    private static readonly Regex MvcInheritsNonGeneric = new(
+        @"^(?:System\.Web\.Mvc\.)?(?:ViewPage|ViewUserControl|ViewMasterPage)\s*$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Transforme la valeur d'un attribut Inherits en model Razor.
+    ///   - `ViewPage&lt;X&gt;`     → "X" (extrait le generique)
+    ///   - `ViewPage`              → null (pas de @model, Razor utilise dynamic)
+    ///   - `MyApp.MyClass`         → "MyApp.MyClass" (classe custom, kept as-is)
+    /// </summary>
+    private static string? ExtractModelType(string inheritsValue)
+    {
+        var m = MvcInheritsGeneric.Match(inheritsValue);
+        if (m.Success) return m.Groups[1].Value.Trim();
+        if (MvcInheritsNonGeneric.IsMatch(inheritsValue)) return null;
+        return inheritsValue;
+    }
+
     public string Transform(string content, MigrationContext ctx)
     {
         return Directive.Replace(content, m =>
@@ -75,8 +105,11 @@ public sealed class PageDirectiveTransformer : ITransformer
     private string HandlePage(Dictionary<string, string> attrs, MigrationContext ctx, int line)
     {
         var lines = new List<string> { "@page" };
-        if (attrs.TryGetValue("Inherits", out var model))
-            lines.Add($"@model {model}");
+        if (attrs.TryGetValue("Inherits", out var inherits))
+        {
+            var model = ExtractModelType(inherits);
+            if (model != null) lines.Add($"@model {model}");
+        }
 
         // MasterPageFile : Phase 2 — on cable proprement le Layout en
         // suivant la convention de naming `Site.Master` → `_Site.cshtml`.
@@ -101,8 +134,11 @@ public sealed class PageDirectiveTransformer : ITransformer
     private string HandleControl(Dictionary<string, string> attrs, MigrationContext ctx, int line)
     {
         var lines = new List<string>();
-        if (attrs.TryGetValue("Inherits", out var model))
-            lines.Add($"@model {model}");
+        if (attrs.TryGetValue("Inherits", out var inherits))
+        {
+            var model = ExtractModelType(inherits);
+            if (model != null) lines.Add($"@model {model}");
+        }
         ctx.Log(MigrationSeverity.Auto, line, Name,
             ".ascx → partial view : pas de directive specifique, juste `@model` si Inherits etait pose.");
         // Si pas de @model, on ne genere RIEN — les partials Razor
