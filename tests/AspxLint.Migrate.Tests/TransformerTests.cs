@@ -65,12 +65,73 @@ public class TransformerTests
     }
 
     [Fact]
-    public void ServerExpression_raw_warns()
+    public void ServerExpression_simple_identifier_emits_no_warning()
+    {
+        // Razor encode par defaut — c'est le bon comportement pour les
+        // expressions simples (variables, model access, methods sur string).
+        // Pas de warning : on aurait spam le rapport pour rien.
+        var t = new ServerExpressionTransformer();
+        var (output, report) = Run(t, "<%= Model.Name %>");
+        Assert.Equal("@(Model.Name)", output);
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Warning));
+        Assert.Equal(1, report.CountBySeverity(MigrationSeverity.Auto));
+    }
+
+    [Fact]
+    public void ServerExpression_mvc_html_helper_no_warning()
+    {
+        // Html.X(...) retourne IHtmlString -> Razor ne re-encode pas.
+        var t = new ServerExpressionTransformer();
+        var (output, report) = Run(t, "<%= Html.Partial(\"Foo\") %>");
+        Assert.Equal("@(Html.Partial(\"Foo\"))", output);
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Warning));
+    }
+
+    [Fact]
+    public void ServerExpression_mvc_url_helper_no_warning()
     {
         var t = new ServerExpressionTransformer();
-        var (output, report) = Run(t, "<%= Model.Html %>");
-        Assert.Equal("@(Model.Html)", output);
-        Assert.True(report.CountBySeverity(MigrationSeverity.Warning) >= 1);
+        var (output, report) = Run(t, "<%= Url.Action(\"Index\", \"Home\") %>");
+        Assert.Equal("@(Url.Action(\"Index\", \"Home\"))", output);
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Warning));
+    }
+
+    [Fact]
+    public void ServerExpression_explicit_html_raw_no_warning()
+    {
+        var t = new ServerExpressionTransformer();
+        var (output, report) = Run(t, "<%= Html.Raw(Model.Html) %>");
+        Assert.Equal("@(Html.Raw(Model.Html))", output);
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Warning));
+    }
+
+    [Fact]
+    public void ServerExpression_with_html_literal_auto_wraps_in_html_raw()
+    {
+        // Cas legitime : l'expression contient des balises HTML en string
+        // literal -> l'auteur voulait du raw HTML. On wrap automatiquement
+        // en @Html.Raw, avec un Warning pour rappeler le risque XSS.
+        var t = new ServerExpressionTransformer();
+        var (output, report) = Run(t, "<%= Model.Body.Replace(\"\\n\", \"<br>\") %>");
+        Assert.StartsWith("@Html.Raw(", output);
+        Assert.EndsWith(")", output);
+        Assert.Equal(1, report.CountBySeverity(MigrationSeverity.Warning));
+    }
+
+    [Fact]
+    public void ServerExpression_with_inline_html_in_ternary_auto_wraps()
+    {
+        var t = new ServerExpressionTransformer();
+        var (output, _) = Run(t, "<%= cond ? \"<span>x</span>\" : \"\" %>");
+        Assert.Contains("@Html.Raw(", output);
+    }
+
+    [Fact]
+    public void ServerExpression_int_arithmetic_no_warning()
+    {
+        var t = new ServerExpressionTransformer();
+        var (_, report) = Run(t, "<%= i + 1 %>");
+        Assert.Equal(0, report.CountBySeverity(MigrationSeverity.Warning));
     }
 
     [Fact]
