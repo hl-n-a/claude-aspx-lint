@@ -168,6 +168,29 @@ public class MasterPageTests
     }
 
     [Fact]
+    public void Child_empty_asp_content_is_removed()
+    {
+        // <asp:Content ID="X" runat="server"></asp:Content> vide -> supprime.
+        // Le master a `@RenderSection(X, required: false)` donc une section
+        // optionnelle absente n'est pas un probleme — pas besoin de la
+        // declarer vide.
+        var t = new ChildPageContentTransformer();
+        var input = "<asp:Content ContentPlaceHolderID=\"HeaderContent\" runat=\"server\"></asp:Content>";
+        var (output, report) = Run(t, input, "aspx", "x.aspx");
+        Assert.Equal("", output);
+        Assert.True(report.CountBySeverity(MigrationSeverity.Auto) >= 1);
+    }
+
+    [Fact]
+    public void Child_empty_asp_content_with_whitespace_is_removed()
+    {
+        var t = new ChildPageContentTransformer();
+        var input = "<asp:Content ContentPlaceHolderID=\"HeaderContent\" runat=\"server\">\n  \n</asp:Content>";
+        var (output, _) = Run(t, input, "aspx", "x.aspx");
+        Assert.Equal("", output);
+    }
+
+    [Fact]
     public void Child_no_asp_content_unchanged()
     {
         var t = new ChildPageContentTransformer();

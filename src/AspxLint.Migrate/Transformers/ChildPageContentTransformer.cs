@@ -45,7 +45,7 @@ public sealed class ChildPageContentTransformer : ITransformer
         if (!hasAnyTag) return content;
 
         var primary = MasterPageHelpers.PickPrimary(ids);   // null si tous sans ID
-        int inlineCount = 0, sectionCount = 0;
+        int inlineCount = 0, sectionCount = 0, emptyCount = 0;
 
         var result = Content.Replace(content, m =>
         {
@@ -58,6 +58,15 @@ public sealed class ChildPageContentTransformer : ITransformer
                 ctx.Log(MigrationSeverity.Warning, line, Name,
                     "<asp:Content> sans ContentPlaceHolderID — laisse en place pour revue manuelle.");
                 return m.Value;
+            }
+
+            // <asp:Content> vide -> on retire purement (le master a
+            // `@RenderSection(X, required: false)` donc la section optionnelle
+            // peut etre absente sans probleme).
+            if (string.IsNullOrWhiteSpace(inner))
+            {
+                emptyCount++;
+                return "";
             }
 
             if (primary != null && id.Equals(primary, StringComparison.OrdinalIgnoreCase))
@@ -74,10 +83,14 @@ public sealed class ChildPageContentTransformer : ITransformer
             }
         });
 
-        if (inlineCount + sectionCount > 0)
+        if (inlineCount + sectionCount + emptyCount > 0)
         {
+            var parts = new List<string>();
+            if (inlineCount > 0)  parts.Add($"{inlineCount} → inline (primary=`{primary}`)");
+            if (sectionCount > 0) parts.Add($"{sectionCount} → @section");
+            if (emptyCount > 0)   parts.Add($"{emptyCount} vide(s) supprime(s)");
             ctx.Log(MigrationSeverity.Auto, null, Name,
-                $"Page enfant : {inlineCount} <asp:Content> → contenu inline (primary=`{primary}`), {sectionCount} → @section.");
+                "Page enfant : " + string.Join(", ", parts) + ".");
         }
         return result;
     }
