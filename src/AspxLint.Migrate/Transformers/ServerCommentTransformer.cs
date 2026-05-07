@@ -13,8 +13,14 @@ public sealed class ServerCommentTransformer : ITransformer
 {
     public string Name => "ServerComment";
 
+    // Accepte la forme officielle `<%-- ... --%>` ET la forme manuscrite
+    // `<% -- ... -- %>` (avec espaces) qu'on rencontre dans du code legacy.
+    // ASP.NET tolere `<% -- ... -- %>` (souvent traite comme C# qui no-op),
+    // mais en Razor le `--` serait interprete comme l'operateur de
+    // decrement, ce qui casse la compilation. On les traite tous les deux
+    // comme des commentaires.
     private static readonly Regex ServerComment =
-        new(@"<%--([\s\S]*?)--%>", RegexOptions.Compiled);
+        new(@"<%[ \t]*--([\s\S]*?)--[ \t]*%>", RegexOptions.Compiled);
 
     public string Transform(string content, MigrationContext ctx)
     {

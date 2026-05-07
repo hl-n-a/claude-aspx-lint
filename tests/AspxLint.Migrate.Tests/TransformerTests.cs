@@ -52,6 +52,38 @@ public class TransformerTests
         Assert.Empty(report.Actions);
     }
 
+    [Fact]
+    public void ServerComment_handles_handwritten_variant_with_spaces()
+    {
+        // Pattern legacy : <% -- text -- %> (avec espaces apres <% et avant %>).
+        // Pas la syntaxe officielle mais courant dans du code legacy. ASP.NET
+        // tolere — Razor casserait parce que `--` est l'operateur de decrement.
+        var t = new ServerCommentTransformer();
+        var (output, _) = Run(t, "<% -- Appel de la modale -- %>");
+        Assert.Equal("@* Appel de la modale *@", output);
+    }
+
+    [Fact]
+    public void ServerComment_handwritten_variant_no_inner_space()
+    {
+        var t = new ServerCommentTransformer();
+        var (output, _) = Run(t, "<% --Réassurance-- %>");
+        Assert.Equal("@*Réassurance*@", output);
+    }
+
+    [Fact]
+    public void ServerComment_does_not_match_decrement_operator()
+    {
+        // <% var x = --y; %> contient `--` mais c'est un decrement, pas un
+        // commentaire. Ne doit PAS matcher.
+        var t = new ServerCommentTransformer();
+        var (output, report) = Run(t, "<% var x = --y; %>");
+        // Pas de transformation — le statement transformer (pas execute ici)
+        // s'en chargera.
+        Assert.Equal("<% var x = --y; %>", output);
+        Assert.Empty(report.Actions);
+    }
+
     // ============= ServerExpressionTransformer =============
 
     [Fact]
