@@ -22,7 +22,7 @@ public class MigratorTests
         Assert.Contains("@page", result.Content);
         Assert.Contains("@model MyApp.Index", result.Content);
         Assert.Contains("@* comment *@", result.Content);
-        Assert.Contains("@(Title)", result.Content);
+        Assert.Contains("@Title", result.Content);
         // Aucune trace de syntaxe ASPX residuelle.
         Assert.DoesNotContain("<%", result.Content);
         Assert.DoesNotContain("%>", result.Content);
@@ -60,7 +60,7 @@ public class MigratorTests
         """;
         var result = Migrator.Migrate(input, "list.aspx");
         Assert.Contains("@foreach (var item in items) {", result.Content);
-        Assert.Contains("@(item.Name)", result.Content);
+        Assert.Contains("@item.Name", result.Content);
     }
 
     [Fact]

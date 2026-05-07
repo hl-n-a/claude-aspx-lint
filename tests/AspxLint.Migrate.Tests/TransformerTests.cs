@@ -565,6 +565,81 @@ public class TransformerTests
         Assert.Equal("} else {", output);
     }
 
+    // ============= ParenSimplifierTransformer =============
+
+    [Fact]
+    public void ParenSimplifier_simple_identifier_unwraps()
+    {
+        var t = new ParenSimplifierTransformer();
+        var (output, report) = Run(t, "<p>@(BackText)</p>");
+        Assert.Equal("<p>@BackText</p>", output);
+        Assert.Equal(1, report.CountBySeverity(MigrationSeverity.Auto));
+    }
+
+    [Fact]
+    public void ParenSimplifier_dotted_identifier_unwraps()
+    {
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "<span>@(Model.UserName)</span>");
+        Assert.Equal("<span>@Model.UserName</span>", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_keeps_method_calls()
+    {
+        // Pas un simple ident — methode call -> garder les parens.
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "@(BackLink.ToLower())");
+        Assert.Equal("@(BackLink.ToLower())", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_keeps_complex_expressions()
+    {
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "@(i + 1)");
+        Assert.Equal("@(i + 1)", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_does_not_unwrap_when_followed_by_word_char()
+    {
+        // Cas dangereux : `@(idContact)_` -> simplifier en `@idContact_`
+        // ferait que Razor pense que `idContact_` est un identifier complet
+        // au lieu de `idContact` + `_` litteral. NE PAS simplifier.
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "@(idContact)_suffix");
+        Assert.Equal("@(idContact)_suffix", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_does_not_unwrap_when_followed_by_dot()
+    {
+        // `@(methode).` -> `@methode.` est risque (Razor pourrait essayer
+        // de continuer l'identifier apres le dot). NE PAS simplifier.
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "@(methode).");
+        Assert.Equal("@(methode).", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_unwraps_in_attribute_values()
+    {
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "<a href=\"@(BackLink)\">link</a>");
+        Assert.Equal("<a href=\"@BackLink\">link</a>", output);
+    }
+
+    [Fact]
+    public void ParenSimplifier_unwraps_in_class_attribute_with_dash()
+    {
+        // `class="rate-@(x)"` -> `class="rate-@x"` (safe : le `"` apres
+        // n'est pas word/dot).
+        var t = new ParenSimplifierTransformer();
+        var (output, _) = Run(t, "<i class=\"rate-@(starCount)\"></i>");
+        Assert.Equal("<i class=\"rate-@starCount\"></i>", output);
+    }
+
     [Fact]
     public void ServerStatement_braces_inside_strings_dont_count()
     {

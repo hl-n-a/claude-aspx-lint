@@ -57,6 +57,8 @@ public static class Migrator
         // <asp:ContentPlaceHolder>, donc le strip runat="server" ne
         // touche que les tags HTML (form, head, body, div, ...).
         new RunatServerTransformer(),
+        // Polish : simplifie les @(simple_ident) en @simple_ident.
+        new ParenSimplifierTransformer(),
     };
 
     /// <summary>

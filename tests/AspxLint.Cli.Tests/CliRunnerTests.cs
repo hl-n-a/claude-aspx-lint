@@ -648,7 +648,7 @@ public class CliRunnerTests
         var content = File.ReadAllText(outPath);
         Assert.Contains("@page", content);
         Assert.Contains("@model App.Demo", content);
-        Assert.Contains("@(Model.Name)", content);
+        Assert.Contains("@Model.Name", content);
     }
 
     [Fact]
