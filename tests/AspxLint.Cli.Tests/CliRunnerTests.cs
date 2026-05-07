@@ -626,6 +626,110 @@ public class CliRunnerTests
         Assert.Equal(afterFirst, afterSecond);
     }
 
+    // ====== migrate (ASPX -> Razor, Phase 1 syntaxe) ======
+
+    [Fact]
+    public void Migrate_single_file_writes_cshtml_output()
+    {
+        using var tmp = new TempDir();
+        var src = tmp.WriteFile("Demo.aspx",
+            "<%@ Page Inherits=\"App.Demo\" %>\n" +
+            "<h1><%: Model.Name %></h1>\n");
+
+        var (code, stdout, _) = Run("migrate", src,
+            "--out", Path.Combine(tmp.Path, "out"));
+
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("Demo.aspx", stdout);
+        Assert.Contains("Demo.cshtml", stdout);
+
+        var outPath = Path.Combine(tmp.Path, "out", "Demo.cshtml");
+        Assert.True(File.Exists(outPath));
+        var content = File.ReadAllText(outPath);
+        Assert.Contains("@page", content);
+        Assert.Contains("@model App.Demo", content);
+        Assert.Contains("@(Model.Name)", content);
+    }
+
+    [Fact]
+    public void Migrate_directory_recurses_and_mirrors_structure()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile(Path.Combine("Views", "Home", "Index.aspx"),
+            "<%@ Page Inherits=\"App.Home\" %>\nhi\n");
+        tmp.WriteFile(Path.Combine("Controls", "Header.ascx"),
+            "<%@ Control Inherits=\"App.Header\" %>\n");
+
+        var (code, _, _) = Run("migrate", tmp.Path,
+            "--out", Path.Combine(tmp.Path, "out"));
+
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.True(File.Exists(Path.Combine(tmp.Path, "out", "Views", "Home", "Index.cshtml")));
+        // .ascx → _Header.cshtml (Razor convention pour les partials)
+        Assert.True(File.Exists(Path.Combine(tmp.Path, "out", "Controls", "_Header.cshtml")));
+    }
+
+    [Fact]
+    public void Migrate_dry_run_does_not_write_files()
+    {
+        using var tmp = new TempDir();
+        var src = tmp.WriteFile("Foo.aspx", "<%@ Page %>\n");
+        var outDir = Path.Combine(tmp.Path, "out");
+
+        var (code, stdout, _) = Run("migrate", src, "--out", outDir, "--dry-run");
+
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Contains("[dry-run]", stdout);
+        Assert.False(Directory.Exists(outDir) && Directory.GetFiles(outDir, "*", SearchOption.AllDirectories).Length > 0);
+    }
+
+    [Fact]
+    public void Migrate_emits_markdown_report_when_requested()
+    {
+        using var tmp = new TempDir();
+        var src = tmp.WriteFile("Demo.aspx",
+            "<%@ Page Inherits=\"App.Demo\" %>\n" +
+            "<%# Eval(\"Name\") %>\n");
+        var report = Path.Combine(tmp.Path, "report.md");
+
+        Run("migrate", src,
+            "--out", Path.Combine(tmp.Path, "out"),
+            "--report", report);
+
+        Assert.True(File.Exists(report));
+        var md = File.ReadAllText(report);
+        Assert.Contains("# aspx-lint migrate", md);
+        Assert.Contains("transformations automatiques", md);
+        Assert.Contains("Demo.aspx", md);
+    }
+
+    [Fact]
+    public void Migrate_unknown_path_returns_2()
+    {
+        var fake = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".aspx");
+        var (code, _, stderr) = Run("migrate", fake);
+        Assert.Equal(CliRunner.ExitError, code);
+        Assert.Contains("introuvable", stderr);
+    }
+
+    [Fact]
+    public void Migrate_no_args_returns_1()
+    {
+        var (code, _, stderr) = Run("migrate");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("Usage", stderr);
+    }
+
+    [Fact]
+    public void Migrate_unknown_arg_returns_1()
+    {
+        using var tmp = new TempDir();
+        tmp.WriteFile("x.aspx", "<%@ Page %>\n");
+        var (code, _, stderr) = Run("migrate", tmp.Path, "--banana");
+        Assert.Equal(CliRunner.ExitIssuesFound, code);
+        Assert.Contains("--banana", stderr);
+    }
+
     [Fact]
     public void Fix_then_scan_returns_0_for_fixable_issues()
     {

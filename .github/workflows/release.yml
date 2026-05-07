@@ -85,6 +85,12 @@ jobs:
           --output nupkg
           /p:Version=${{ steps.version.outputs.version }}
 
+      - name: Pack Migrate library
+        run: >
+          dotnet pack src/AspxLint.Migrate -c Release --no-build
+          --output nupkg
+          /p:Version=${{ steps.version.outputs.version }}
+
       - name: Publish Desktop as self-contained single-file exe
         run: >
           dotnet publish src/AspxLint.Desktop -c Release -r win-x64
@@ -114,6 +120,7 @@ jobs:
           files: |
             nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg
             nupkg/aspx-lint.MSBuild.${{ steps.version.outputs.version }}.nupkg
+            nupkg/aspx-lint.Migrate.${{ steps.version.outputs.version }}.nupkg
             publish/desktop/aspx-lint-desktop-${{ steps.version.outputs.version }}-win-x64.exe
 
       # ---------------------------------------------------------------
@@ -132,10 +139,11 @@ jobs:
             echo "::warning::NUGET_API_KEY non defini — skip du push NuGet. La GitHub Release est tout de meme creee."
             exit 0
           fi
-          # On pousse les deux packages (CLI + MSBuild integration).
+          # On pousse les 3 packages : CLI + MSBuild integration + Migrate library.
           for pkg in \
             "nupkg/aspx-lint.${{ steps.version.outputs.version }}.nupkg" \
-            "nupkg/aspx-lint.MSBuild.${{ steps.version.outputs.version }}.nupkg" ; do
+            "nupkg/aspx-lint.MSBuild.${{ steps.version.outputs.version }}.nupkg" \
+            "nupkg/aspx-lint.Migrate.${{ steps.version.outputs.version }}.nupkg" ; do
             dotnet nuget push "$pkg" \
               --api-key "$NUGET_API_KEY" \
               --source https://api.nuget.org/v3/index.json \

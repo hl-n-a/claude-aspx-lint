@@ -40,6 +40,7 @@ public static class CliRunner
                 "fix"         => await FixAsync(args[1..], stdout, stderr),
                 "analyze"     => await AnalyzeAsync(args[1..], stdout, stderr),
                 "rules"       => RulesAsync(args[1..], stdout, stderr),
+                "migrate"     => await MigrateAsync(args[1..], stdout, stderr),
                 "pre-commit"  => await PreCommitAsync(args[1..], stdout, stderr),
                 "watch"       => await WatchAsync(args[1..], stdout, stderr),
                 "init"        => await InitAsync(args[1..], stdout, stderr),
@@ -295,6 +296,8 @@ public static class CliRunner
         o.WriteLine("  aspx-lint analyze --ext <ext> (--stdin | <file>)        [JSON, pour IDE]");
         o.WriteLine("  aspx-lint fix --stdin --ext <ext> [--rule <id>]          [stdin -> stdout, pour IDE]");
         o.WriteLine("  aspx-lint rules [--lang fr|en]                           [JSON metadata des regles]");
+        o.WriteLine("  aspx-lint migrate <path> [--out <dir>] [--dry-run] [--report <file.md>]");
+        o.WriteLine("                                                           [.aspx -> .cshtml + rapport]");
         o.WriteLine("  aspx-lint scan <path> [--json | --sarif | --junit | --codeclimate | --tap]");
         o.WriteLine("                       [--severity error|warning|info] [--quiet] [--no-color] [--lang fr|en]");
         o.WriteLine("  aspx-lint fix  <path> [--rule <id>] [--dry-run]");
@@ -1025,6 +1028,145 @@ public static class CliRunner
             new { rules },
             new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
         stdout.WriteLine(json);
+        return ExitOk;
+    }
+
+    /// <summary>
+    /// migrate <path> [--out <dir>] [--dry-run] [--report <file.md>]
+    ///
+    /// Convertit un fichier ou un dossier d'ASPX/ASCX/MASTER en .cshtml.
+    /// Phase 1 : transformations syntaxiques uniquement (commentaires
+    /// serveur, directives, expressions, instructions). Genere un
+    /// rapport markdown listant les actions et les TODO manuels.
+    /// </summary>
+    private static async Task<int> MigrateAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        if (args.Length == 0)
+        {
+            stderr.WriteLine("Usage: aspx-lint migrate <path> [--out <dir>] [--dry-run] [--report <file.md>]");
+            return ExitIssuesFound;
+        }
+
+        var path = args[0];
+        string? outDir = null;
+        string? reportPath = null;
+        bool dryRun = false;
+
+        for (int i = 1; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--out" when i + 1 < args.Length:
+                    outDir = args[++i];
+                    break;
+                case "--report" when i + 1 < args.Length:
+                    reportPath = args[++i];
+                    break;
+                case "--dry-run":
+                    dryRun = true;
+                    break;
+                default:
+                    stderr.WriteLine($"Argument inconnu : {args[i]}");
+                    return ExitIssuesFound;
+            }
+        }
+
+        // Determine si c'est un fichier ou un dossier.
+        bool isFile = File.Exists(path);
+        bool isDir  = Directory.Exists(path);
+        if (!isFile && !isDir)
+        {
+            stderr.WriteLine($"Path introuvable : {path}");
+            return ExitError;
+        }
+
+        var supportedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".aspx", ".ascx", ".master", ".asax" };
+
+        var sources = new List<(string Absolute, string Relative)>();
+        string root;
+        if (isFile)
+        {
+            root = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path)) ?? ".";
+            sources.Add((System.IO.Path.GetFullPath(path), System.IO.Path.GetFileName(path)));
+        }
+        else
+        {
+            root = System.IO.Path.GetFullPath(path);
+            foreach (var f in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories))
+            {
+                if (supportedExts.Contains(System.IO.Path.GetExtension(f)))
+                    sources.Add((f, System.IO.Path.GetRelativePath(root, f)));
+            }
+        }
+
+        if (sources.Count == 0)
+        {
+            stdout.WriteLine("Aucun fichier .aspx/.ascx/.master/.asax trouve.");
+            return ExitOk;
+        }
+
+        // Sortie : <out> ou <root>/migrated/ par defaut.
+        var resolvedOut = outDir ?? System.IO.Path.Combine(root, "migrated");
+        if (!dryRun) Directory.CreateDirectory(resolvedOut);
+
+        var report = new global::AspxLint.Migrate.MigrationReport();
+        int converted = 0;
+
+        foreach (var (absolute, relative) in sources.OrderBy(s => s.Relative))
+        {
+            string content;
+            try { content = await File.ReadAllTextAsync(absolute); }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"Lecture echouee {relative} : {ex.Message}");
+                continue;
+            }
+
+            var result = global::AspxLint.Migrate.Migrator.Migrate(content, relative, report);
+            converted++;
+
+            var outRelative = result.SuggestedOutputName;
+            var outAbsolute = System.IO.Path.Combine(resolvedOut, outRelative);
+
+            if (dryRun)
+            {
+                stdout.WriteLine($"[dry-run] {relative} → {outRelative} ({result.Actions.Count} action(s))");
+            }
+            else
+            {
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(outAbsolute)!);
+                await File.WriteAllTextAsync(outAbsolute, result.Content);
+                stdout.WriteLine($"migrate {relative} → {outRelative} ({result.Actions.Count} action(s))");
+            }
+        }
+
+        // Resume + rapport.
+        var auto    = report.CountBySeverity(global::AspxLint.Migrate.MigrationSeverity.Auto);
+        var warning = report.CountBySeverity(global::AspxLint.Migrate.MigrationSeverity.Warning);
+        var manual  = report.CountBySeverity(global::AspxLint.Migrate.MigrationSeverity.Manual);
+
+        stdout.WriteLine();
+        stdout.WriteLine($"{converted} fichier(s) {(dryRun ? "analyse(s)" : "convertis")} : {auto} auto, {warning} warning, {manual} manual.");
+
+        if (reportPath != null)
+        {
+            try
+            {
+                await File.WriteAllTextAsync(reportPath, report.ToMarkdown());
+                stdout.WriteLine($"Rapport ecrit : {reportPath}");
+            }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"Ecriture du rapport echouee : {ex.Message}");
+                return ExitError;
+            }
+        }
+        else if (manual + warning > 0)
+        {
+            stdout.WriteLine("Tip : passe `--report migration-report.md` pour avoir le detail.");
+        }
+
         return ExitOk;
     }
 }

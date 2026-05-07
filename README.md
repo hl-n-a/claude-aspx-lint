@@ -15,7 +15,7 @@ handlers JS inline). Scan parallèle (~0.7s sur 350 fichiers), config par
 projet (`.aspxlintrc.json`), disable inline par commentaire, watch mode,
 hook pre-commit, intégration GitHub Actions avec annotations PR.
 
-Cinq manières de l'utiliser :
+Six manières de l'utiliser :
 
 | Forme | Pour qui | Install |
 |---|---|---|
@@ -24,6 +24,7 @@ Cinq manières de l'utiliser :
 | **Extension VS Code** | Diagnostics inline pendant que tu codes | Marketplace : `aspx-lint` |
 | **Dashboard Web** | Inspection ponctuelle, mobile, équipe | Servie par `AspxLint.Server` (`/`) |
 | **App desktop** | Pairing tél / desktop, tray Windows | `dotnet run --project src/AspxLint.Desktop` |
+| **Migrate ASPX → Razor** (Phase 1) | Convertir un projet Web Forms vers Razor | `aspx-lint migrate <path>` |
 
 ---
 
@@ -288,6 +289,67 @@ Dans les deux cas :
 - Le dashboard est servi en HTTP local avec un token d'auth régénéré à chaque
   démarrage
 - Endpoints : `/api/scan`, `/api/save` (avec backup `.bak`), `/api/restore`
+
+---
+
+## Migration ASPX → Razor (Phase 1)
+
+> Phase 1 = transformations syntaxiques uniquement. Les contrôles serveur
+> (`<asp:Label>`, `<asp:GridView>`, ...) et le code-behind (`Page_Load`,
+> ViewState, postbacks) sont laissés tels quels avec des marqueurs
+> `@*TODO[aspx-migrate] *@` à reprendre à la main. Phases 2-5 à venir.
+
+```bash
+aspx-lint migrate path/to/Index.aspx --out path/to/output --report report.md
+aspx-lint migrate path/to/Views --out path/to/Pages --dry-run
+```
+
+### Ce qui est transformé automatiquement (Phase 1)
+
+| ASPX | Razor |
+|---|---|
+| `<%-- comment --%>` | `@* comment *@` |
+| `<%@ Page Inherits="X" %>` | `@page` + `@model X` |
+| `<%@ Control Inherits="X" %>` | `@model X` (partial view) |
+| `<%@ Import Namespace="X" %>` | `@using X` |
+| `<%: expr %>` (HTML-encoded) | `@(expr)` |
+| `<%= expr %>` (raw, ⚠ warning) | `@(expr)` (Razor encode par défaut) |
+| `<%# Eval("X") %>` (data-bind, ⚠ manual) | `@(Eval("X"))` + commentaire TODO |
+| `<% if (x) { %>` ... `<% } %>` | `@if (x) {` ... `}` |
+| `<% foreach (...) { %>` ... `<% } %>` | `@foreach (...) {` ... `}` |
+| `<% var x = 1; %>` | `@{ var x = 1; }` |
+
+### Ce qui est flaggé pour reprise manuelle
+
+- `<%@ Master %>` → migration vers `_Layout.cshtml` (Phase 2)
+- `<%@ Register %>` → `@addTagHelper` ou `<partial name="...">` selon contexte
+- `<%@ OutputCache %>` → `[ResponseCache]` ou `<cache>` tag helper
+- `<%# Eval("X") %>` → l'expression est conservée mais le contexte de
+  data-binding n'existe pas en Razor — vérifier que `@Model` ou la
+  variable de boucle expose bien la propriété
+- `Response.Write(...)` dans un bloc `<% %>` → généralement remplaçable
+  par `@(...)` direct
+- Tout `<asp:...>` (contrôles serveur) → laissé en place, à convertir
+  manuellement (Phase 3)
+
+### Le rapport markdown
+
+`--report report.md` génère un rapport groupé par fichier source listant
+chaque action avec son niveau (`auto` / `⚠ warning` / `✋ manual`) et le
+numéro de ligne. Idéal pour piper dans une PR description.
+
+### Tester sans risque
+
+`--dry-run` affiche ce qui serait fait sans écrire de fichier. Le rapport
+est quand même généré si `--report` est passé.
+
+### Sortie : convention de nommage
+
+| Source | Sortie |
+|---|---|
+| `Foo.aspx` | `Foo.cshtml` |
+| `Bar.ascx` | `_Bar.cshtml` (Razor convention pour les partials) |
+| `Site.master` | `_Site.cshtml` (Razor layout) |
 
 ---
 

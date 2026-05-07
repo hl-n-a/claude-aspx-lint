@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AspxLint.Migrate</RootNamespace>
+
+    <PackageId>aspx-lint.Migrate</PackageId>
+    <Title>aspx-lint Razor migration</Title>
+    <Description>ASPX → Razor migration toolkit. Transforms .aspx/.ascx/.master files into .cshtml with a structured report of what was auto-converted and what needs manual review. Used by `aspx-lint migrate` (CLI) and exposed as a library.</Description>
+    <Authors>hl-n-a</Authors>
+    <PackageProjectUrl>https://hl-n-a.github.io/claude-aspx-lint/</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hl-n-a/claude-aspx-lint</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>asp.net;web-forms;aspx;razor;migration</PackageTags>
+  </PropertyGroup>
+
+</Project>

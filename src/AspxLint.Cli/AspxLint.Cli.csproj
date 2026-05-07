@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AspxLint.Core\AspxLint.Core.csproj" />
+    <ProjectReference Include="..\AspxLint.Migrate\AspxLint.Migrate.csproj" />
   </ItemGroup>
 
   <ItemGroup>
